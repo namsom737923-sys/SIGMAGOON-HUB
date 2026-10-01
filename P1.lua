@@ -1,32 +1,38 @@
 --============================================================
--- SIGMAGOON HUB v4.0 — P1/3 (Core + Anti-Check)
+-- SIGMAGOON HUB v7.0 — P1 (Core Logic)
 --============================================================
-if _G.SG_Loaded then
+if _G.SG5_P1 then
     pcall(function()
         for _, g in ipairs(game.Players.LocalPlayer.PlayerGui:GetChildren()) do
-            if g.Name:find("SIGMAGOON") then g:Destroy() end
+            if g.Name:find("SIGMAGOON") or g.Name:find("CamAimbot") then g:Destroy() end
+        end
+        for _, g in ipairs(game:GetService("CoreGui"):GetChildren()) do
+            if g.Name:find("SIGMAGOON") or g.Name:find("CamAimbot") then g:Destroy() end
         end
     end)
 end
-_G.SG_Loaded = true
+_G.SG5_P1 = true
+_G.CamAimbotV2 = nil
+_G.CamAimbotV3 = nil
+_G.CamAimbotV4 = nil
 
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInput  = game:GetService("UserInputService")
+local Tween      = game:GetService("TweenService")
 local Lighting   = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-print("[SG v4.0] P1/3 เริ่มโหลด")
+print("[SG v7.0] P1 เริ่มโหลด")
 
 local CONFIG = {
     FlyEnabled=false, FlySpeed=50,
     SpeedEnabled=false, SpeedValue=16,
     JumpEnabled=false, JumpPower=100,
-    NoCollideEnabled=false,
-    InvisibleEnabled=false,
-    GodmodeEnabled=false,
+    TPWalkEnabled=false, TPWalkSpeed=500,
+    TPWalkAntiVoid=true, TPWalkWaterWalk=true, TPWalkWaterY=4,
     LaserEnabled=true, MaxDistance=500,
     BeamWidth0=0.15, BeamWidth1=0.05,
     GreenColor=Color3.fromRGB(0,255,80),
@@ -39,51 +45,30 @@ local CONFIG = {
     VehicleMuzzleNames={"VehicleMuzzle","TurretMuzzle","GunMuzzle","Muzzle","BarrelEnd"},
     FallbackToHandle=true,
     AimMode="camera", AimSmoothing=0.35,
-    AimbotEnabled=false, AimbotFOV=60, AimbotMaxDist=500,
-    AimbotSmooth=0.85, AimbotWallCheck=true, AimbotTeamCheck=true,
-    AimbotLockPart="Head", AimbotStrength=5, AimbotPredict=0.15,
+    AimbotEnabled=false, AimbotFOV=180, AimbotMaxDist=5000,
+    AimbotSmooth=0.85, AimbotWallCheck=true, AimbotTeamCheck=false,
+    AimbotLockPart="Head",
     LaserPiercing=true, LaserPierceCount=6,
-    TPWalkEnabled=false, TPWalkSpeed=500,
-    TPWalkAntiVoid=true, TPWalkWaterWalk=true, TPWalkWaterY=4,
-    NoCollideTransparency=true,
+    NoCollideEnabled=false, NoCollideTransparency=true,
     NoCollideNames={"Grass","Leaf","Leaves","Bush","Shrub","Plant","Flower","Fern","Vine","Weed"},
-    AutoLowGraphics=false,
-
-    -- ESP
+    InvisibleEnabled=false,
+    GodmodeEnabled=false,
     PlayerESPEnabled=false, PlayerESPColor=Color3.fromRGB(255,40,40),
-    PlayerESPTeamCheck=true, PlayerESPShowName=true, PlayerESPShowDistance=true,
-    PlayerESPShowBox=false, PlayerESPShowTracer=false,
-    PlayerESPBoxColor=Color3.fromRGB(255,40,40),
-    PlayerESPTracerColor=Color3.fromRGB(255,40,40),
-    PlayerESPTracerOrigin="bottom",
-
+    PlayerESPTeamCheck=false, PlayerESPShowName=true, PlayerESPShowDistance=true,
     BotESPEnabled=false, BotESPColor=Color3.fromRGB(255,40,40),
     BotESPShowName=true, BotESPShowHealth=true,
-    BotESPShowBox=false, BotESPShowTracer=false,
-
     VehicleESPEnabled=false, VehicleESPColor=Color3.fromRGB(255,180,40),
     VehicleESPShowName=true, VehicleESPShowHealth=true,
-
     ESPTextSizeMin=10, ESPTextSizeMax=20, ESPMaxDist=1000,
-
-    -- Auto FPS Warp
-    AutoFPSWarpEnabled=false,
-    AutoFPSMin=10, AutoFPSMax=60,
-    AutoFPSWarpDistance=1000,
-    AutoFPSWarpCooldown=5,
-    AutoFPSWarpVerifyCount=3,
-    AutoFPSWarpReturnEnabled=true,
-    AutoFPSAntiVoidHeight=100,
-    AutoFPSPlatformSize=20,
-
-    -- Silent Aim
-    SilentAimEnabled=false,
-    SilentAimHitPart="Head",
-    SilentAimFOV=90,
-    SilentAimMaxDist=1000,
-    SilentAimWallCheck=true,
-    SilentAimTeamCheck=true,
-    SilentAimVisibilityCheck=true,
+    AutoLowGraphics=false,
+    FPSWarpEnabled=false,
+    FPSMin=10, FPSMax=60,
+    FPSWarpDistance=1000,
+    FPSWarpCooldown=5,
+    FPSWarpVerifyCount=3,
+    FPSWarpReturnEnabled=true,
+    FPSAntiVoidHeight=100,
+    FPSPlatformSize=20,
 }
 _G.SG_CONFIG = CONFIG
 
@@ -117,20 +102,33 @@ end
 local function isSameTeam(tp)
     if not CONFIG.AimbotTeamCheck then return false end
     if not tp or tp == player then return true end
-    if player.Team and tp.Team then return player.Team == tp.Team end
-    if player.TeamColor and tp.TeamColor then return player.TeamColor == tp.TeamColor end
+    local ok, result = pcall(function()
+        if player.Team and tp.Team then return player.Team == tp.Team end
+        return false
+    end)
+    if ok and result then return true end
     return false
 end
 
 _G.SG_getHRP = getHRP
 _G.SG_getHum = getHum
+_G.SG_buildFilter = buildFilter
 _G.SG_safeFindAtt = safeFindAtt
 _G.SG_isSameTeam = isSameTeam
-_G.SG_buildFilter = buildFilter
 
---============================================================
+-- FPS
+local FPS = { value = 60, accum = 0, frames = 0 }
+RunService.RenderStepped:Connect(function(dt)
+    FPS.accum = FPS.accum + dt
+    FPS.frames = FPS.frames + 1
+    if FPS.accum >= 0.5 then
+        FPS.value = math.floor(FPS.frames / FPS.accum)
+        FPS.accum = 0; FPS.frames = 0
+    end
+end)
+_G.SG_FPS = FPS
+
 -- FLY
---============================================================
 local flyBV, flyBG, flyConn
 local function stopFly()
     if flyBV then flyBV:Destroy(); flyBV=nil end
@@ -147,8 +145,7 @@ local function startFly()
     flyBV.Parent = hrp
     flyBG = Instance.new("BodyGyro")
     flyBG.MaxTorque = Vector3.new(9e9,9e9,9e9)
-    flyBG.P = 1000
-    flyBG.D = 50
+    flyBG.P = 1000; flyBG.D = 50
     flyBG.CFrame = hrp.CFrame
     flyBG.Parent = hrp
     flyConn = RunService.Heartbeat:Connect(function()
@@ -173,9 +170,7 @@ end
 _G.SG_startFly = startFly
 _G.SG_stopFly = stopFly
 
---============================================================
 -- SPEED / JUMP
---============================================================
 RunService.Heartbeat:Connect(function()
     if CONFIG.SpeedEnabled then
         local hum = getHum()
@@ -187,9 +182,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
---============================================================
 -- NO-COLLIDE
---============================================================
 local ncCache = {}
 local function matchesNC(inst)
     local n = inst.Name:lower()
@@ -225,9 +218,7 @@ end
 _G.SG_applyNC = applyNC
 _G.SG_revertNC = revertNC
 
---============================================================
 -- INVISIBLE / GODMODE
---============================================================
 local invisConns = {}
 local function setInvisible(state)
     for _, c in ipairs(invisConns) do c:Disconnect() end
@@ -262,9 +253,7 @@ end
 _G.SG_setInvisible = setInvisible
 _G.SG_setGodmode = setGodmode
 
---============================================================
 -- TP SYSTEM
---============================================================
 local savedSpawn, savedDeath = nil, nil
 local teleportPoints = {}
 local function saveCurrentSpawn() local h=getHRP(); if h then savedSpawn=h.CFrame end end
@@ -298,9 +287,7 @@ _G.SG_warpToTP = warpToTP
 _G.SG_reportCoords = reportCoords
 _G.SG_getTeleportPoints = function() return teleportPoints end
 
---============================================================
 -- TP WALK
---============================================================
 RunService.Heartbeat:Connect(function(dt)
     if not CONFIG.TPWalkEnabled or CONFIG.TPWalkSpeed<=0 then return end
     local hum = getHum()
@@ -324,9 +311,7 @@ RunService.Heartbeat:Connect(function(dt)
     hrp.CFrame = CFrame.new(newPos) * (hrp.CFrame - hrp.CFrame.Position)
 end)
 
---============================================================
 -- LASER
---============================================================
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
@@ -411,6 +396,7 @@ local function updateLaser(laser)
     local aimDir = laser.smoothDir
     local dir = aimDir * CONFIG.MaxDistance
     origin = origin + aimDir * 0.1
+
     local hits = {}
     if CONFIG.LaserPiercing then
         local co, rem = origin, dir
@@ -437,6 +423,7 @@ local function updateLaser(laser)
         local s = workspace:Raycast(origin, dir, rayParams)
         hits = s and { s } or {}
     end
+
     local stop = nil
     if #hits>0 then
         if not CONFIG.LaserPiercing then stop = hits[1]
@@ -448,11 +435,14 @@ local function updateLaser(laser)
             if not stop then stop = hits[#hits] end
         end
     end
+
     local hitPos, isHit
     if stop then hitPos=stop.Position; isHit=true
     else hitPos=origin+dir; isHit=false end
+
     laser.p0.CFrame = CFrame.new(origin)
     laser.p1.CFrame = CFrame.new(hitPos)
+
     local ht, hT = classifyHit(stop)
     if isHit then
         if ht=="player" then
@@ -475,51 +465,60 @@ local function updateLaser(laser)
 end
 _G.SG_updateLaser = updateLaser
 
---============================================================
--- AIMBOT
---============================================================
-local function hasLOS(fromP, toP, ignore)
-    local p = RaycastParams.new()
-    p.FilterType = Enum.RaycastFilterType.Exclude
-    p.IgnoreWater = true
-    local f = { laserFolder }
-    for _, v in ipairs(ignore or {}) do table.insert(f, v) end
-    p.FilterDescendantsInstances = f
-    return workspace:Raycast(fromP, toP-fromP, p) == nil
+-- CAMERA AIMBOT
+local aimbotTarget, aimbotTargetPart = nil, nil
+
+local function hasWallBetween(fromPos, targetPos, targetChar)
+    if not CONFIG.AimbotWallCheck then return false end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater = true
+    local filterList = {}
+    local myChar = player.Character
+    if myChar then table.insert(filterList, myChar) end
+    if targetChar then table.insert(filterList, targetChar) end
+    table.insert(filterList, camera)
+    params.FilterDescendantsInstances = filterList
+    local result = workspace:Raycast(fromPos, targetPos - fromPos, params)
+    if not result then return false end
+    if result.Instance and result.Instance:IsA("BasePart") then
+        if result.Instance:FindFirstAncestorOfClass("Accessory") then return false end
+        if targetChar and result.Instance:IsDescendantOf(targetChar) then return false end
+        if myChar and result.Instance:IsDescendantOf(myChar) then return false end
+        return true
+    end
+    return false
 end
-local function predictPos(char, part, t)
-    if t<=0 then return part.Position end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return part.Position end
-    return part.Position + hrp.AssemblyLinearVelocity*t
-end
-local function findBestTarget(originP, aimDir, maxD)
-    local best, bestS = nil, math.huge
-    local camP = camera.CFrame.Position
-    local camL = camera.CFrame.LookVector
+
+local function findAimbotTarget()
+    local camPos = camera.CFrame.Position
+    local camLook = camera.CFrame.LookVector
+    local best, bestScore = nil, math.huge
+    local bestPart = nil
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player and not isSameTeam(plr) then
             local char = plr.Character
             if char then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                local tp = char:FindFirstChild(CONFIG.AimbotLockPart)
-                    or char:FindFirstChild("HumanoidRootPart")
+                local targetPart = char:FindFirstChild(CONFIG.AimbotLockPart)
                     or char:FindFirstChild("Head")
-                if hum and hum.Health>0 and tp then
-                    local tPos = predictPos(char, tp, CONFIG.AimbotPredict)
-                    local toT = tPos - originP
-                    if toT.Magnitude<=maxD then
-                        local ang = math.deg(math.acos(math.clamp(toT.Unit:Dot(aimDir),-1,1)))
-                        local toC = tPos - camP
-                        local cAng = math.deg(math.acos(math.clamp(toC.Unit:Dot(camL),-1,1)))
-                        if ang<=CONFIG.AimbotFOV/2 and cAng<=CONFIG.AimbotFOV/2 then
-                            local ok = true
-                            if CONFIG.AimbotWallCheck then
-                                ok = hasLOS(originP, tPos, { char, player.Character })
-                            end
-                            if ok then
-                                local s = ang + cAng*0.5
-                                if s<bestS then bestS=s; best=char end
+                    or char:FindFirstChild("HumanoidRootPart")
+                    or char:FindFirstChild("Torso")
+                    or char:FindFirstChild("UpperTorso")
+                if targetPart then
+                    local toTarget = targetPart.Position - camPos
+                    local dist = toTarget.Magnitude
+                    if dist <= CONFIG.AimbotMaxDist then
+                        local angle = math.deg(math.acos(math.clamp(
+                            toTarget.Unit:Dot(camLook), -1, 1)))
+                        if angle <= CONFIG.AimbotFOV / 2 then
+                            if not hasWallBetween(camPos, targetPart.Position, char) then
+                                local score = angle + dist * 0.001
+                                if score < bestScore then
+                                    bestScore = score
+                                    best = char
+                                    bestPart = targetPart
+                                end
                             end
                         end
                     end
@@ -527,113 +526,139 @@ local function findBestTarget(originP, aimDir, maxD)
             end
         end
     end
-    return best
+    return best, bestPart
 end
-_G.SG_findBestTarget = findBestTarget
-_G.SG_predictPos = predictPos
-_G.SG_hasLOS = hasLOS
 
---============================================================
--- ANTI-CHECK
---============================================================
-local ANTI_LOCK = {}
-_G.SG_ANTI_LOCK = ANTI_LOCK
-local function lockFeature(id) ANTI_LOCK[id] = true end
-local function unlockFeature(id) ANTI_LOCK[id] = nil end
-local function isLocked(id) return ANTI_LOCK[id] == true end
-_G.SG_lockFeature = lockFeature
-_G.SG_unlockFeature = unlockFeature
-_G.SG_isLocked = isLocked
+RunService.RenderStepped:Connect(function(dt)
+    if not CONFIG.AimbotEnabled then
+        aimbotTarget = nil
+        aimbotTargetPart = nil
+        return
+    end
+    local target, targetPart = findAimbotTarget()
+    aimbotTarget = target
+    aimbotTargetPart = targetPart
+    if target and targetPart then
+        local camPos = camera.CFrame.Position
+        local targetPos = targetPart.Position
+        local desiredCF = CFrame.new(camPos, targetPos)
+        local dist = (targetPos - camPos).Magnitude
+        local distFactor = math.clamp(dist / CONFIG.AimbotMaxDist, 0, 1)
+        local baseSmooth = CONFIG.AimbotSmooth
+        local dynamicSmooth = baseSmooth * (0.7 + distFactor * 0.3)
+        dynamicSmooth = math.clamp(dynamicSmooth, 0.5, 0.99)
+        local alpha = 1 - math.pow(dynamicSmooth, dt * 60)
+        alpha = math.clamp(alpha, 0.01, 0.5)
+        camera.CFrame = camera.CFrame:Lerp(desiredCF, alpha)
+    end
+end)
+_G.SG_getAimbotTarget = function() return aimbotTarget, aimbotTargetPart end
 
-local ANTI_CHECKS = {
-    { id="walkspeed", name="WalkSpeed", risk="ต่ำ", test=function()
-        local h=getHum(); if not h then error("ไม่มี") end
-        local s=h.WalkSpeed; h.WalkSpeed=s+5; task.wait(0.1); h.WalkSpeed=s
-    end },
-    { id="jump", name="JumpPower", risk="ต่ำ", test=function()
-        local h=getHum(); if not h then error("ไม่มี") end
-        local s=h.JumpPower; h.JumpPower=s+10; task.wait(0.1); h.JumpPower=s
-    end },
-    { id="hipheight", name="HipHeight", risk="กลาง", test=function()
-        local h=getHum(); if not h then error("ไม่มี") end
-        local s=h.HipHeight; h.HipHeight=s+0.1; task.wait(0.1); h.HipHeight=s
-    end },
-    { id="fly_bodyvel", name="BodyVelocity", risk="สูง", test=function()
-        local hrp=getHRP(); if not hrp then error("ไม่มี") end
-        local bv=Instance.new("BodyVelocity")
-        bv.Velocity=Vector3.zero; bv.MaxForce=Vector3.new(1,1,1)
-        bv.Parent=hrp; task.wait(0.1); bv:Destroy()
-    end },
-    { id="fly_bodygyro", name="BodyGyro", risk="สูง", test=function()
-        local hrp=getHRP(); if not hrp then error("ไม่มี") end
-        local bg=Instance.new("BodyGyro")
-        bg.MaxTorque=Vector3.new(1,1,1); bg.Parent=hrp
-        task.wait(0.1); bg:Destroy()
-    end },
-    { id="cframe_warp_small", name="CFrame Warp 5s", risk="กลาง", test=function()
-        local hrp=getHRP(); if not hrp then error("ไม่มี") end
-        local s=hrp.CFrame; hrp.CFrame=s+Vector3.new(0,5,0)
-        task.wait(0.05); hrp.CFrame=s
-    end },
-    { id="cframe_warp_big", name="Warp 100 studs", risk="สูงมาก", test=function()
-        local hrp=getHRP(); if not hrp then error("ไม่มี") end
-        local s=hrp.CFrame; hrp.CFrame=s+Vector3.new(100,0,0)
-        task.wait(0.3); if hrp.Parent then hrp.CFrame=s end
-    end },
-    { id="maxhealth", name="MaxHealth ∞", risk="สูง", test=function()
-        local h=getHum(); if not h then error("ไม่มี") end
-        local s=h.MaxHealth; h.MaxHealth=math.huge; task.wait(0.1); h.MaxHealth=s
-    end },
-    { id="clear_children", name="ClearAllChildren", risk="สูงมาก", test=function()
-        local c=player.Character
-        if not c or not c.ClearAllChildren then error("ไม่มี") end
-    end },
-    { id="instance_sss", name="Instance.new SSS", risk="สูง", test=function()
-        local ok=pcall(function()
-            local p=Instance.new("Part")
-            p.Parent=game:GetService("ServerScriptService")
-            p:Destroy()
-        end)
-        if not ok then error("block") end
-    end },
-    { id="remote_event", name="RemoteEvent", risk="กลาง", test=function()
-        local found=false
-        for _,v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-            if v:IsA("RemoteEvent") then found=true break end
-        end
-        if not found then error("ไม่พบ") end
-    end },
-    { id="animator", name="Animator", risk="กลาง", test=function()
-        local h=getHum()
-        if not h then error("ไม่มี") end
-        if not h:FindFirstChildOfClass("Animator") then error("ไม่มี") end
-    end },
-    { id="nocollide_part", name="CanCollide false", risk="ต่ำ", test=function()
-        local c=player.Character; if not c then error("ไม่มี") end
-        local hrp=c:FindFirstChild("HumanoidRootPart")
-        if not hrp then error("ไม่มี HRP") end
-        local s=hrp.CanCollide; hrp.CanCollide=false
-        task.wait(0.1); hrp.CanCollide=s
-    end },
-    { id="transparency", name="Transparency = 1", risk="ต่ำ", test=function()
-        local c=player.Character; if not c then error("ไม่มี") end
-        for _,d in ipairs(c:GetDescendants()) do
-            if d:IsA("BasePart") then
-                local s=d.Transparency
-                d.Transparency=1; task.wait(0.05); d.Transparency=s
-                break
+-- AUTO FPS WARP
+local FPSWarp = {
+    lastWarpTime = 0, warping = false,
+    returnPoint = nil, verifyCounter = 0, onPlatform = nil,
+}
+_G.SG_FPSWarp = FPSWarp
+
+local function createAntiVoidPlatform(pos)
+    local existing = workspace:FindFirstChild("__SG_Platform")
+    if existing then existing:Destroy() end
+    local platform = Instance.new("Part")
+    platform.Name = "__SG_Platform"
+    platform.Size = Vector3.new(CONFIG.FPSPlatformSize, 1, CONFIG.FPSPlatformSize)
+    platform.Anchored = true
+    platform.CanCollide = true
+    platform.Material = Enum.Material.Neon
+    platform.Color = Color3.fromRGB(0,200,255)
+    platform.Transparency = 0.5
+    platform.Position = Vector3.new(pos.X, pos.Y - 3, pos.Z)
+    platform.Parent = workspace
+    FPSWarp.onPlatform = platform
+    return platform
+end
+
+local function findBestFPSPoint(radius)
+    local hrp = getHRP()
+    if not hrp then return nil end
+    local origin = hrp.Position
+    local bestPos, bestScore = nil, -math.huge
+    for i = 1, 16 do
+        local angle = (i/16) * math.pi * 2
+        local dist = radius * (0.3 + math.random()*0.7)
+        local offset = Vector3.new(math.cos(angle)*dist, 0, math.sin(angle)*dist)
+        local testPos = origin + offset
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { player.Character or workspace, laserFolder }
+        local hit = workspace:Raycast(testPos + Vector3.new(0,50,0), Vector3.new(0,-300,0), params)
+        if hit then
+            if math.abs(hit.Position.Y - origin.Y) < CONFIG.FPSAntiVoidHeight then
+                local score = (hit.Position - origin).Magnitude
+                if score > bestScore then bestScore = score; bestPos = hit.Position end
             end
         end
-    end },
-    { id="raycast", name="Raycast", risk="ต่ำ", test=function()
-        workspace:Raycast(Vector3.new(0,100,0), Vector3.new(0,-200,0))
-    end },
-    { id="camera_cframe", name="Camera CFrame", risk="กลาง", test=function()
-        local save=camera.CFrame
-        camera.CFrame=save*CFrame.new(0,0.01,0)
-        task.wait(0.05); camera.CFrame=save
-    end },
-}
-_G.SG_ANTI_CHECKS = ANTI_CHECKS
+    end
+    return bestPos
+end
 
-print("[SG v4.0] P1/3 โหลดเสร็จ")
+local function tryFPSWarp()
+    if FPSWarp.warping then return end
+    local now = tick()
+    if now - FPSWarp.lastWarpTime < CONFIG.FPSWarpCooldown then return end
+    local hrp = getHRP()
+    if not hrp then return end
+    FPSWarp.warping = true
+    FPSWarp.lastWarpTime = now
+    if not FPSWarp.returnPoint then FPSWarp.returnPoint = hrp.CFrame end
+    local newPos = findBestFPSPoint(CONFIG.FPSWarpDistance)
+    if not newPos then FPSWarp.warping = false; return end
+    if math.abs(newPos.Y - hrp.Position.Y) > CONFIG.FPSAntiVoidHeight then
+        createAntiVoidPlatform(newPos)
+        task.wait(0.2)
+    end
+    hrp.CFrame = CFrame.new(newPos + Vector3.new(0,5,0))
+    task.delay(2, function()
+        if not CONFIG.FPSWarpEnabled then FPSWarp.warping = false; return end
+        if FPS.value >= CONFIG.FPSMin then
+            FPSWarp.returnPoint = nil
+            FPSWarp.verifyCounter = 0
+            if FPSWarp.onPlatform then FPSWarp.onPlatform:Destroy(); FPSWarp.onPlatform = nil end
+        else
+            FPSWarp.verifyCounter = FPSWarp.verifyCounter + 1
+            if FPSWarp.verifyCounter >= CONFIG.FPSWarpVerifyCount then
+                if CONFIG.FPSWarpReturnEnabled and FPSWarp.returnPoint then
+                    local h = getHRP()
+                    if h then h.CFrame = FPSWarp.returnPoint end
+                end
+                FPSWarp.returnPoint = nil
+                FPSWarp.verifyCounter = 0
+                if FPSWarp.onPlatform then FPSWarp.onPlatform:Destroy(); FPSWarp.onPlatform = nil end
+            end
+        end
+        FPSWarp.warping = false
+    end)
+end
+_G.SG_tryFPSWarp = tryFPSWarp
+
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.FPSWarpEnabled then return end
+    if FPSWarp.warping then return end
+    if FPS.value < CONFIG.FPSMin then tryFPSWarp() end
+    local hrp = getHRP()
+    if hrp and CONFIG.FPSAntiVoidHeight > 0 then
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = { player.Character or workspace, laserFolder }
+        local hit = workspace:Raycast(hrp.Position, Vector3.new(0, -CONFIG.FPSAntiVoidHeight, 0), rp)
+        if not hit and hrp.Position.Y > 50 then
+            if not FPSWarp.onPlatform or not FPSWarp.onPlatform.Parent then
+                createAntiVoidPlatform(hrp.Position)
+            else
+                FPSWarp.onPlatform.Position = Vector3.new(hrp.Position.X, FPSWarp.onPlatform.Position.Y, hrp.Position.Z)
+            end
+        end
+    end
+end)
+
+print("[SG v7.0] P1 โหลดเสร็จ")
