@@ -1,5 +1,5 @@
 --============================================================
--- SIGMAGOON HUB v3.1 — P1/2 (Core)
+-- SIGMAGOON HUB v4.0 — P1/3 (Core + Anti-Check)
 --============================================================
 if _G.SG_Loaded then
     pcall(function()
@@ -18,7 +18,7 @@ local Lighting   = game:GetService("Lighting")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-print("[SG v3.1] P1/2 เริ่มโหลด")
+print("[SG v4.0] P1/3 เริ่มโหลด")
 
 local CONFIG = {
     FlyEnabled=false, FlySpeed=50,
@@ -48,12 +48,42 @@ local CONFIG = {
     NoCollideTransparency=true,
     NoCollideNames={"Grass","Leaf","Leaves","Bush","Shrub","Plant","Flower","Fern","Vine","Weed"},
     AutoLowGraphics=false,
+
+    -- ESP
     PlayerESPEnabled=false, PlayerESPColor=Color3.fromRGB(255,40,40),
     PlayerESPTeamCheck=true, PlayerESPShowName=true, PlayerESPShowDistance=true,
+    PlayerESPShowBox=false, PlayerESPShowTracer=false,
+    PlayerESPBoxColor=Color3.fromRGB(255,40,40),
+    PlayerESPTracerColor=Color3.fromRGB(255,40,40),
+    PlayerESPTracerOrigin="bottom",
+
     BotESPEnabled=false, BotESPColor=Color3.fromRGB(255,40,40),
     BotESPShowName=true, BotESPShowHealth=true,
+    BotESPShowBox=false, BotESPShowTracer=false,
+
     VehicleESPEnabled=false, VehicleESPColor=Color3.fromRGB(255,180,40),
+    VehicleESPShowName=true, VehicleESPShowHealth=true,
+
     ESPTextSizeMin=10, ESPTextSizeMax=20, ESPMaxDist=1000,
+
+    -- Auto FPS Warp
+    AutoFPSWarpEnabled=false,
+    AutoFPSMin=10, AutoFPSMax=60,
+    AutoFPSWarpDistance=1000,
+    AutoFPSWarpCooldown=5,
+    AutoFPSWarpVerifyCount=3,
+    AutoFPSWarpReturnEnabled=true,
+    AutoFPSAntiVoidHeight=100,
+    AutoFPSPlatformSize=20,
+
+    -- Silent Aim
+    SilentAimEnabled=false,
+    SilentAimHitPart="Head",
+    SilentAimFOV=90,
+    SilentAimMaxDist=1000,
+    SilentAimWallCheck=true,
+    SilentAimTeamCheck=true,
+    SilentAimVisibilityCheck=true,
 }
 _G.SG_CONFIG = CONFIG
 
@@ -98,6 +128,9 @@ _G.SG_safeFindAtt = safeFindAtt
 _G.SG_isSameTeam = isSameTeam
 _G.SG_buildFilter = buildFilter
 
+--============================================================
+-- FLY
+--============================================================
 local flyBV, flyBG, flyConn
 local function stopFly()
     if flyBV then flyBV:Destroy(); flyBV=nil end
@@ -140,6 +173,9 @@ end
 _G.SG_startFly = startFly
 _G.SG_stopFly = stopFly
 
+--============================================================
+-- SPEED / JUMP
+--============================================================
 RunService.Heartbeat:Connect(function()
     if CONFIG.SpeedEnabled then
         local hum = getHum()
@@ -151,6 +187,9 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+--============================================================
+-- NO-COLLIDE
+--============================================================
 local ncCache = {}
 local function matchesNC(inst)
     local n = inst.Name:lower()
@@ -186,6 +225,9 @@ end
 _G.SG_applyNC = applyNC
 _G.SG_revertNC = revertNC
 
+--============================================================
+-- INVISIBLE / GODMODE
+--============================================================
 local invisConns = {}
 local function setInvisible(state)
     for _, c in ipairs(invisConns) do c:Disconnect() end
@@ -220,6 +262,9 @@ end
 _G.SG_setInvisible = setInvisible
 _G.SG_setGodmode = setGodmode
 
+--============================================================
+-- TP SYSTEM
+--============================================================
 local savedSpawn, savedDeath = nil, nil
 local teleportPoints = {}
 local function saveCurrentSpawn() local h=getHRP(); if h then savedSpawn=h.CFrame end end
@@ -253,6 +298,9 @@ _G.SG_warpToTP = warpToTP
 _G.SG_reportCoords = reportCoords
 _G.SG_getTeleportPoints = function() return teleportPoints end
 
+--============================================================
+-- TP WALK
+--============================================================
 RunService.Heartbeat:Connect(function(dt)
     if not CONFIG.TPWalkEnabled or CONFIG.TPWalkSpeed<=0 then return end
     local hum = getHum()
@@ -276,6 +324,9 @@ RunService.Heartbeat:Connect(function(dt)
     hrp.CFrame = CFrame.new(newPos) * (hrp.CFrame - hrp.CFrame.Position)
 end)
 
+--============================================================
+-- LASER
+--============================================================
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
@@ -424,6 +475,9 @@ local function updateLaser(laser)
 end
 _G.SG_updateLaser = updateLaser
 
+--============================================================
+-- AIMBOT
+--============================================================
 local function hasLOS(fromP, toP, ignore)
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
@@ -477,5 +531,109 @@ local function findBestTarget(originP, aimDir, maxD)
 end
 _G.SG_findBestTarget = findBestTarget
 _G.SG_predictPos = predictPos
+_G.SG_hasLOS = hasLOS
 
-print("[SG v3.1] P1/2 โหลดเสร็จ — พร้อม P2/2")
+--============================================================
+-- ANTI-CHECK
+--============================================================
+local ANTI_LOCK = {}
+_G.SG_ANTI_LOCK = ANTI_LOCK
+local function lockFeature(id) ANTI_LOCK[id] = true end
+local function unlockFeature(id) ANTI_LOCK[id] = nil end
+local function isLocked(id) return ANTI_LOCK[id] == true end
+_G.SG_lockFeature = lockFeature
+_G.SG_unlockFeature = unlockFeature
+_G.SG_isLocked = isLocked
+
+local ANTI_CHECKS = {
+    { id="walkspeed", name="WalkSpeed", risk="ต่ำ", test=function()
+        local h=getHum(); if not h then error("ไม่มี") end
+        local s=h.WalkSpeed; h.WalkSpeed=s+5; task.wait(0.1); h.WalkSpeed=s
+    end },
+    { id="jump", name="JumpPower", risk="ต่ำ", test=function()
+        local h=getHum(); if not h then error("ไม่มี") end
+        local s=h.JumpPower; h.JumpPower=s+10; task.wait(0.1); h.JumpPower=s
+    end },
+    { id="hipheight", name="HipHeight", risk="กลาง", test=function()
+        local h=getHum(); if not h then error("ไม่มี") end
+        local s=h.HipHeight; h.HipHeight=s+0.1; task.wait(0.1); h.HipHeight=s
+    end },
+    { id="fly_bodyvel", name="BodyVelocity", risk="สูง", test=function()
+        local hrp=getHRP(); if not hrp then error("ไม่มี") end
+        local bv=Instance.new("BodyVelocity")
+        bv.Velocity=Vector3.zero; bv.MaxForce=Vector3.new(1,1,1)
+        bv.Parent=hrp; task.wait(0.1); bv:Destroy()
+    end },
+    { id="fly_bodygyro", name="BodyGyro", risk="สูง", test=function()
+        local hrp=getHRP(); if not hrp then error("ไม่มี") end
+        local bg=Instance.new("BodyGyro")
+        bg.MaxTorque=Vector3.new(1,1,1); bg.Parent=hrp
+        task.wait(0.1); bg:Destroy()
+    end },
+    { id="cframe_warp_small", name="CFrame Warp 5s", risk="กลาง", test=function()
+        local hrp=getHRP(); if not hrp then error("ไม่มี") end
+        local s=hrp.CFrame; hrp.CFrame=s+Vector3.new(0,5,0)
+        task.wait(0.05); hrp.CFrame=s
+    end },
+    { id="cframe_warp_big", name="Warp 100 studs", risk="สูงมาก", test=function()
+        local hrp=getHRP(); if not hrp then error("ไม่มี") end
+        local s=hrp.CFrame; hrp.CFrame=s+Vector3.new(100,0,0)
+        task.wait(0.3); if hrp.Parent then hrp.CFrame=s end
+    end },
+    { id="maxhealth", name="MaxHealth ∞", risk="สูง", test=function()
+        local h=getHum(); if not h then error("ไม่มี") end
+        local s=h.MaxHealth; h.MaxHealth=math.huge; task.wait(0.1); h.MaxHealth=s
+    end },
+    { id="clear_children", name="ClearAllChildren", risk="สูงมาก", test=function()
+        local c=player.Character
+        if not c or not c.ClearAllChildren then error("ไม่มี") end
+    end },
+    { id="instance_sss", name="Instance.new SSS", risk="สูง", test=function()
+        local ok=pcall(function()
+            local p=Instance.new("Part")
+            p.Parent=game:GetService("ServerScriptService")
+            p:Destroy()
+        end)
+        if not ok then error("block") end
+    end },
+    { id="remote_event", name="RemoteEvent", risk="กลาง", test=function()
+        local found=false
+        for _,v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+            if v:IsA("RemoteEvent") then found=true break end
+        end
+        if not found then error("ไม่พบ") end
+    end },
+    { id="animator", name="Animator", risk="กลาง", test=function()
+        local h=getHum()
+        if not h then error("ไม่มี") end
+        if not h:FindFirstChildOfClass("Animator") then error("ไม่มี") end
+    end },
+    { id="nocollide_part", name="CanCollide false", risk="ต่ำ", test=function()
+        local c=player.Character; if not c then error("ไม่มี") end
+        local hrp=c:FindFirstChild("HumanoidRootPart")
+        if not hrp then error("ไม่มี HRP") end
+        local s=hrp.CanCollide; hrp.CanCollide=false
+        task.wait(0.1); hrp.CanCollide=s
+    end },
+    { id="transparency", name="Transparency = 1", risk="ต่ำ", test=function()
+        local c=player.Character; if not c then error("ไม่มี") end
+        for _,d in ipairs(c:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local s=d.Transparency
+                d.Transparency=1; task.wait(0.05); d.Transparency=s
+                break
+            end
+        end
+    end },
+    { id="raycast", name="Raycast", risk="ต่ำ", test=function()
+        workspace:Raycast(Vector3.new(0,100,0), Vector3.new(0,-200,0))
+    end },
+    { id="camera_cframe", name="Camera CFrame", risk="กลาง", test=function()
+        local save=camera.CFrame
+        camera.CFrame=save*CFrame.new(0,0.01,0)
+        task.wait(0.05); camera.CFrame=save
+    end },
+}
+_G.SG_ANTI_CHECKS = ANTI_CHECKS
+
+print("[SG v4.0] P1/3 โหลดเสร็จ")
