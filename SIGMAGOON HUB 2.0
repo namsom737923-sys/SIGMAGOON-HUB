@@ -1,0 +1,2589 @@
+--============================================================
+-- SIGMAGOON HUB v2.1 — PART 1/2
+-- Core Logic + ESP + Anti-Check + Auto FPS Warp
+--============================================================
+if _G.SigmaGoonHubRunning then
+    pcall(function()
+        for _, g in ipairs(game.Players.LocalPlayer.PlayerGui:GetChildren()) do
+            if g.Name:find("SIGMAGOON") then g:Destroy() end
+        end
+        for _, o in ipairs(workspace:GetChildren()) do
+            if o.Name:find("__LSF_") or o.Name:find("__ESP_") or o.Name:find("__SG_") then o:Destroy() end
+        end
+    end)
+end
+_G.SigmaGoonHubRunning = true
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local UserInput   = game:GetService("UserInputService")
+local Tween       = game:GetService("TweenService")
+local Lighting    = game:GetService("Lighting")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+print("[SG] Part 1/2 เริ่มโหลด")
+task.wait(0.1)
+
+--============================================================
+-- CONFIG
+--============================================================
+local CONFIG = {
+    FlyEnabled = false, FlySpeed = 50,
+    SpeedEnabled = false, SpeedValue = 16,
+    JumpEnabled = false, JumpPower = 100,
+    NoCollideEnabled = false,
+    InvisibleEnabled = false,
+    GodmodeEnabled = false,
+    LaserEnabled = true,
+    MaxDistance = 500,
+    BeamWidth0 = 0.15, BeamWidth1 = 0.05,
+    GreenColor = Color3.fromRGB(0, 255, 80),
+    RedColor = Color3.fromRGB(255, 40, 40),
+    BlueColor = Color3.fromRGB(80, 160, 255),
+    HitDotSize = 0.35,
+    HitDotColor = Color3.fromRGB(255, 60, 60),
+    PlayerDotColor = Color3.fromRGB(80, 160, 255),
+    MuzzleNames = { "Muzzle","BarrelEnd","FirePoint","Tip","MuzzleAttachment","Barrel","GunMuzzle" },
+    VehicleMuzzleNames = { "VehicleMuzzle","TurretMuzzle","GunMuzzle","Muzzle","BarrelEnd" },
+    FallbackToHandle = true,
+    AimMode = "camera",
+    AimSmoothing = 0.35,
+    AimbotEnabled = false, AimbotFOV = 60, AimbotMaxDist = 500,
+    AimbotSmooth = 0.85, AimbotWallCheck = true, AimbotTeamCheck = true,
+    AimbotLockPart = "Head", AimbotStrength = 5, AimbotPredict = 0.15,
+    LaserPiercing = true, LaserPierceCount = 6,
+    TPWalkEnabled = false, TPWalkSpeed = 500,
+    TPWalkAntiVoid = true, TPWalkWaterWalk = true, TPWalkWaterY = 4,
+    NoCollideTransparency = true,
+    NoCollideNames = { "Grass","Leaf","Leaves","Bush","Shrub","Plant","Flower","Fern","Vine","Weed" },
+    AutoLowGraphics = false,
+    PlayerESPEnabled = false,
+    PlayerESPColor = Color3.fromRGB(255, 40, 40),
+    PlayerESPTeamCheck = true,
+    PlayerESPShowName = true,
+    PlayerESPShowDistance = true,
+    PlayerESPShowBox = false,
+    PlayerESPShowTracer = false,
+    PlayerESPBoxColor = Color3.fromRGB(255, 40, 40),
+    PlayerESPTracerColor = Color3.fromRGB(255, 40, 40),
+    PlayerESPTracerOrigin = "bottom",
+    BotESPEnabled = false,
+    BotESPColor = Color3.fromRGB(255, 40, 40),
+    BotESPShowName = true,
+    BotESPShowHealth = true,
+    BotESPShowBox = false,
+    BotESPShowTracer = false,
+    VehicleESPEnabled = false,
+    VehicleESPColor = Color3.fromRGB(255, 180, 40),
+    VehicleESPShowName = true,
+    VehicleESPShowHealth = true,
+    ESPTextSizeMin = 10,
+    ESPTextSizeMax = 20,
+    ESPMaxDist = 1000,
+    AutoFPSWarpEnabled = false,
+    AutoFPSMin = 10,
+    AutoFPSMax = 60,
+    AutoFPSWarpDistance = 1000,
+    AutoFPSWarpCooldown = 5,
+    AutoFPSWarpVerifyCount = 3,
+    AutoFPSWarpReturnEnabled = true,
+    AutoFPSAntiVoidHeight = 100,
+    AutoFPSPlatformSize = 20,
+}
+_G.SG_CONFIG = CONFIG
+
+--============================================================
+-- UTIL
+--============================================================
+local laserFolder = Instance.new("Folder")
+laserFolder.Name = "__LSF_" .. math.random(1000, 9999)
+laserFolder.Parent = workspace
+_G.SG_laserFolder = laserFolder
+
+local function getHRP()
+    local c = player.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function getHum()
+    local c = player.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+local function buildFilter()
+    local f = { laserFolder }
+    local c = player.Character
+    if c then table.insert(f, c) end
+    return f
+end
+local function safeFindAtt(root, names)
+    if not root then return nil end
+    for _, name in ipairs(names) do
+        local att = root:FindFirstChild(name, true)
+        if att and att:IsA("Attachment") then return att end
+    end
+    return nil
+end
+local function isSameTeam(tp)
+    if not CONFIG.AimbotTeamCheck then return false end
+    if not tp or tp == player then return true end
+    if player.Team and tp.Team then return player.Team == tp.Team end
+    if player.TeamColor and tp.TeamColor then return player.TeamColor == tp.TeamColor end
+    return false
+end
+
+_G.SG_getHRP = getHRP
+_G.SG_getHum = getHum
+_G.SG_buildFilter = buildFilter
+_G.SG_safeFindAtt = safeFindAtt
+_G.SG_isSameTeam = isSameTeam
+
+print("[SG] Util OK")
+
+--============================================================
+-- FPS
+--============================================================
+local FPS = { value = 60, accum = 0, frames = 0, history = {} }
+RunService.RenderStepped:Connect(function(dt)
+    FPS.accum = FPS.accum + dt
+    FPS.frames = FPS.frames + 1
+    if FPS.accum >= 0.5 then
+        FPS.value = math.floor(FPS.frames / FPS.accum)
+        table.insert(FPS.history, FPS.value)
+        if #FPS.history > 30 then table.remove(FPS.history, 1) end
+        FPS.accum = 0
+        FPS.frames = 0
+    end
+end)
+_G.SG_FPS = FPS
+
+--============================================================
+-- FLY
+--============================================================
+local flyBV, flyBG, flyConn
+local function stopFly()
+    if flyBV then flyBV:Destroy(); flyBV = nil end
+    if flyBG then flyBG:Destroy(); flyBG = nil end
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+end
+local function startFly()
+    stopFly()
+    local hrp = getHRP()
+    if not hrp then return end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = hrp
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.P = 1000
+    flyBG.D = 50
+    flyBG.CFrame = hrp.CFrame
+    flyBG.Parent = hrp
+    flyConn = RunService.Heartbeat:Connect(function()
+        if not CONFIG.FlyEnabled then return end
+        local root = getHRP()
+        if not root or not flyBV or not flyBG then return end
+        local moveDir = Vector3.zero
+        local camCF = camera.CFrame
+        local hum = getHum()
+        if hum then
+            local md = hum.MoveDirection
+            if md.Magnitude > 0 then
+                moveDir = (camCF.LookVector * md.Z + camCF.RightVector * md.X).Unit
+            end
+        end
+        if UserInput:IsKeyDown(Enum.KeyCode.Space) then
+            moveDir = moveDir + Vector3.new(0, 1, 0)
+        end
+        if UserInput:IsKeyDown(Enum.KeyCode.LeftControl) then
+            moveDir = moveDir + Vector3.new(0, -1, 0)
+        end
+        flyBV.Velocity = moveDir * CONFIG.FlySpeed
+        flyBG.CFrame = camCF
+    end)
+end
+_G.SG_startFly = startFly
+_G.SG_stopFly = stopFly
+
+--============================================================
+-- SPEED / JUMP
+--============================================================
+RunService.Heartbeat:Connect(function()
+    if CONFIG.SpeedEnabled then
+        local hum = getHum()
+        if hum then hum.WalkSpeed = CONFIG.SpeedValue end
+    end
+    if CONFIG.JumpEnabled then
+        local hum = getHum()
+        if hum then hum.UseJumpPower = true; hum.JumpPower = CONFIG.JumpPower end
+    end
+end)
+
+--============================================================
+-- NO-COLLIDE
+--============================================================
+local ncCache = {}
+local function matchesNC(inst)
+    local n = inst.Name:lower()
+    for _, kw in ipairs(CONFIG.NoCollideNames) do
+        if n:find(kw:lower(), 1, true) then return true end
+    end
+    return false
+end
+local function processNC(inst)
+    if not inst or not inst:IsA("BasePart") then return end
+    if ncCache[inst] then return end
+    ncCache[inst] = { CanCollide = inst.CanCollide, Transparency = inst.Transparency }
+    inst.CanCollide = false
+    if CONFIG.NoCollideTransparency then inst.Transparency = 0.7 end
+end
+local function applyNC()
+    if not CONFIG.NoCollideEnabled then return end
+    for _, inst in ipairs(workspace:GetDescendants()) do
+        if inst:IsA("BasePart") and matchesNC(inst) then processNC(inst) end
+    end
+end
+local function revertNC()
+    for inst, data in pairs(ncCache) do
+        if inst and inst.Parent then
+            pcall(function()
+                inst.CanCollide = data.CanCollide
+                inst.Transparency = data.Transparency
+            end)
+        end
+    end
+    table.clear(ncCache)
+end
+_G.SG_applyNC = applyNC
+_G.SG_revertNC = revertNC
+
+--============================================================
+-- INVISIBLE / GODMODE
+--============================================================
+local invisConns = {}
+local function setInvisible(state)
+    for _, c in ipairs(invisConns) do c:Disconnect() end
+    table.clear(invisConns)
+    local function applyChar(char)
+        if not char then return end
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.LocalTransparencyModifier = state and 1 or 0
+            end
+        end
+    end
+    applyChar(player.Character)
+    if state then
+        table.insert(invisConns, RunService.RenderStepped:Connect(function()
+            applyChar(player.Character)
+        end))
+    end
+end
+local godConn
+local function setGodmode(state)
+    if godConn then godConn:Disconnect(); godConn = nil end
+    if state then
+        local hum = getHum()
+        if hum then hum.MaxHealth = math.huge; hum.Health = math.huge end
+        godConn = RunService.Heartbeat:Connect(function()
+            local h = getHum()
+            if h then h.MaxHealth = math.huge; h.Health = math.huge end
+        end)
+    end
+end
+_G.SG_setInvisible = setInvisible
+_G.SG_setGodmode = setGodmode
+
+--============================================================
+-- TP SYSTEM
+--============================================================
+local savedSpawn, savedDeath = nil, nil
+local teleportPoints = {}
+local function saveCurrentSpawn() local h = getHRP(); if h then savedSpawn = h.CFrame end end
+local function warpToSpawn() if savedSpawn then local h = getHRP(); if h then h.CFrame = savedSpawn end end end
+local function saveDeathPoint() local h = getHRP(); if h then savedDeath = h.CFrame end end
+local function warpToDeath() if savedDeath then local h = getHRP(); if h then h.CFrame = savedDeath end end end
+local function clearSpawn() savedSpawn = nil; savedDeath = nil end
+local function addTeleportPoint()
+    local h = getHRP()
+    if not h then return end
+    table.insert(teleportPoints, { cf = h.CFrame })
+end
+local function removeLastTP()
+    if #teleportPoints > 0 then table.remove(teleportPoints) end
+end
+local function warpToTP(idx)
+    local p = teleportPoints[idx]
+    if p then local h = getHRP(); if h then h.CFrame = p.cf end end
+end
+local function reportCoords()
+    local h = getHRP()
+    if not h then return "N/A" end
+    local p = h.Position
+    return string.format("X: %.1f  Y: %.1f  Z: %.1f", p.X, p.Y, p.Z)
+end
+_G.SG_saveCurrentSpawn = saveCurrentSpawn
+_G.SG_warpToSpawn = warpToSpawn
+_G.SG_saveDeathPoint = saveDeathPoint
+_G.SG_warpToDeath = warpToDeath
+_G.SG_clearSpawn = clearSpawn
+_G.SG_addTeleportPoint = addTeleportPoint
+_G.SG_removeLastTP = removeLastTP
+_G.SG_warpToTP = warpToTP
+_G.SG_reportCoords = reportCoords
+_G.SG_getTeleportPoints = function() return teleportPoints end
+
+--============================================================
+-- TP WALK
+--============================================================
+RunService.Heartbeat:Connect(function(dt)
+    if not CONFIG.TPWalkEnabled or CONFIG.TPWalkSpeed <= 0 then return end
+    local hum = getHum()
+    local hrp = getHRP()
+    if not hum or not hrp or hum.Health <= 0 then return end
+    local md = hum.MoveDirection
+    if md.Magnitude < 0.01 then return end
+    local step = md * CONFIG.TPWalkSpeed * dt
+    local newPos = hrp.Position + step
+    if CONFIG.TPWalkAntiVoid then
+        local p = RaycastParams.new()
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        p.IgnoreWater = not CONFIG.TPWalkWaterWalk
+        p.FilterDescendantsInstances = { player.Character or workspace, laserFolder }
+        if not workspace:Raycast(newPos + Vector3.new(0, 5, 0), Vector3.new(0, -200, 0), p) then return end
+    end
+    if CONFIG.TPWalkWaterWalk and newPos.Y < CONFIG.TPWalkWaterY then
+        newPos = Vector3.new(newPos.X, CONFIG.TPWalkWaterY, newPos.Z)
+    end
+    if CONFIG.TPWalkAntiVoid and newPos.Y < -100 then return end
+    hrp.CFrame = CFrame.new(newPos) * (hrp.CFrame - hrp.CFrame.Position)
+end)
+
+--============================================================
+-- AUTO FPS WARP
+--============================================================
+local FPSWarp = {
+    lastWarpTime = 0,
+    warping = false,
+    returnPoint = nil,
+    verifyCounter = 0,
+    onPlatform = nil,
+}
+_G.SG_FPSWarp = FPSWarp
+
+local function createAntiVoidPlatform(pos)
+    local existing = workspace:FindFirstChild("__SG_Platform")
+    if existing then existing:Destroy() end
+    local platform = Instance.new("Part")
+    platform.Name = "__SG_Platform"
+    platform.Size = Vector3.new(CONFIG.AutoFPSPlatformSize, 1, CONFIG.AutoFPSPlatformSize)
+    platform.Anchored = true
+    platform.CanCollide = true
+    platform.Material = Enum.Material.Neon
+    platform.Color = Color3.fromRGB(0, 200, 255)
+    platform.Transparency = 0.5
+    platform.Position = Vector3.new(pos.X, pos.Y - 3, pos.Z)
+    platform.Parent = workspace
+    FPSWarp.onPlatform = platform
+    return platform
+end
+
+local function findBestFPSPoint(radius)
+    local hrp = getHRP()
+    if not hrp then return nil end
+    local origin = hrp.Position
+    local bestPos, bestScore = nil, -math.huge
+    for i = 1, 16 do
+        local angle = (i / 16) * math.pi * 2
+        local dist = radius * (0.3 + math.random() * 0.7)
+        local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+        local testPos = origin + offset
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { player.Character or workspace, laserFolder }
+        local hit = workspace:Raycast(testPos + Vector3.new(0, 50, 0), Vector3.new(0, -300, 0), params)
+        if hit then
+            if math.abs(hit.Position.Y - origin.Y) < CONFIG.AutoFPSAntiVoidHeight then
+                local score = (hit.Position - origin).Magnitude
+                if score > bestScore then
+                    bestScore = score
+                    bestPos = hit.Position
+                end
+            end
+        end
+    end
+    return bestPos
+end
+
+local function tryFPSWarp()
+    if FPSWarp.warping then return end
+    local now = tick()
+    if now - FPSWarp.lastWarpTime < CONFIG.AutoFPSWarpCooldown then return end
+    local hrp = getHRP()
+    if not hrp then return end
+    FPSWarp.warping = true
+    FPSWarp.lastWarpTime = now
+    if not FPSWarp.returnPoint then
+        FPSWarp.returnPoint = hrp.CFrame
+    end
+    local newPos = findBestFPSPoint(CONFIG.AutoFPSWarpDistance)
+    if not newPos then
+        FPSWarp.warping = false
+        return
+    end
+    if math.abs(newPos.Y - hrp.Position.Y) > CONFIG.AutoFPSAntiVoidHeight then
+        createAntiVoidPlatform(newPos)
+        task.wait(0.2)
+    end
+    hrp.CFrame = CFrame.new(newPos + Vector3.new(0, 5, 0))
+
+    task.delay(2, function()
+        if not CONFIG.AutoFPSWarpEnabled then
+            FPSWarp.warping = false
+            return
+        end
+        local currentFPS = FPS.value
+        if currentFPS >= CONFIG.AutoFPSMin then
+            FPSWarp.returnPoint = nil
+            FPSWarp.verifyCounter = 0
+            if FPSWarp.onPlatform then
+                FPSWarp.onPlatform:Destroy()
+                FPSWarp.onPlatform = nil
+            end
+        else
+            FPSWarp.verifyCounter = FPSWarp.verifyCounter + 1
+            if FPSWarp.verifyCounter >= CONFIG.AutoFPSWarpVerifyCount then
+                if CONFIG.AutoFPSWarpReturnEnabled and FPSWarp.returnPoint then
+                    local h = getHRP()
+                    if h then h.CFrame = FPSWarp.returnPoint end
+                end
+                FPSWarp.returnPoint = nil
+                FPSWarp.verifyCounter = 0
+                if FPSWarp.onPlatform then
+                    FPSWarp.onPlatform:Destroy()
+                    FPSWarp.onPlatform = nil
+                end
+            end
+        end
+        FPSWarp.warping = false
+    end)
+end
+_G.SG_tryFPSWarp = tryFPSWarp
+
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.AutoFPSWarpEnabled then return end
+    if FPSWarp.warping then return end
+    if FPS.value < CONFIG.AutoFPSMin then
+        tryFPSWarp()
+    end
+    local hrp = getHRP()
+    if hrp and CONFIG.AutoFPSAntiVoidHeight > 0 then
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        rp.FilterDescendantsInstances = { player.Character or workspace, laserFolder }
+        local hit = workspace:Raycast(hrp.Position, Vector3.new(0, -CONFIG.AutoFPSAntiVoidHeight, 0), rp)
+        if not hit and hrp.Position.Y > 50 then
+            if not FPSWarp.onPlatform or not FPSWarp.onPlatform.Parent then
+                createAntiVoidPlatform(hrp.Position)
+            else
+                FPSWarp.onPlatform.Position = Vector3.new(hrp.Position.X, FPSWarp.onPlatform.Position.Y, hrp.Position.Z)
+            end
+        end
+    end
+end)
+
+--============================================================
+-- LASER
+--============================================================
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+rayParams.FilterDescendantsInstances = { laserFolder }
+
+local function createLaser(startAtt)
+    if not startAtt or not startAtt.Parent then return nil end
+    local p0 = Instance.new("Part")
+    p0.Anchored = true
+    p0.CanCollide = false
+    p0.CanQuery = false
+    p0.CanTouch = false
+    p0.Transparency = 1
+    p0.Size = Vector3.new(0.1, 0.1, 0.1)
+    p0.Parent = laserFolder
+    local a0 = Instance.new("Attachment")
+    a0.Parent = p0
+    local p1 = Instance.new("Part")
+    p1.Anchored = true
+    p1.CanCollide = false
+    p1.CanQuery = false
+    p1.CanTouch = false
+    p1.Transparency = 1
+    p1.Size = Vector3.new(0.1, 0.1, 0.1)
+    p1.Parent = laserFolder
+    local a1 = Instance.new("Attachment")
+    a1.Parent = p1
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = a0
+    beam.Attachment1 = a1
+    beam.Width0 = CONFIG.BeamWidth0
+    beam.Width1 = CONFIG.BeamWidth1
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Color = ColorSequence.new(CONFIG.GreenColor)
+    beam.Transparency = NumberSequence.new(0.1)
+    beam.Parent = p0
+    local dot = Instance.new("Part")
+    dot.Shape = Enum.PartType.Ball
+    dot.Size = Vector3.new(CONFIG.HitDotSize, CONFIG.HitDotSize, CONFIG.HitDotSize)
+    dot.Anchored = true
+    dot.CanCollide = false
+    dot.CanQuery = false
+    dot.CanTouch = false
+    dot.Material = Enum.Material.Neon
+    dot.Color = CONFIG.HitDotColor
+    dot.Transparency = 1
+    dot.Parent = laserFolder
+    return { att = startAtt, p0 = p0, a0 = a0, p1 = p1, a1 = a1, beam = beam, dot = dot, smoothDir = nil, destroyed = false }
+end
+local function destroyLaser(l)
+    if not l or l.destroyed then return end
+    l.destroyed = true
+    for _, o in ipairs({ l.p0, l.p1, l.dot }) do
+        if o and o.Parent then o:Destroy() end
+    end
+end
+_G.SG_createLaser = createLaser
+_G.SG_destroyLaser = destroyLaser
+
+local statusFunc = function() end
+_G.SG_setStatusFunc = function(fn) statusFunc = fn end
+
+local function getAimDir(laser)
+    if CONFIG.AimMode == "camera" then return camera.CFrame.LookVector end
+    if CONFIG.AimMode == "character" then
+        local hrp = getHRP()
+        if hrp then return hrp.CFrame.LookVector end
+        return camera.CFrame.LookVector
+    end
+    if laser.att and laser.att.Parent then return laser.att.WorldCFrame.LookVector end
+    return camera.CFrame.LookVector
+end
+
+local function classifyHit(r)
+    if not r then return "none", nil end
+    local inst = r.Instance
+    local m = inst:FindFirstAncestorOfClass("Model")
+    local h = m and m:FindFirstChildOfClass("Humanoid")
+    if h then
+        local p = Players:GetPlayerFromCharacter(m)
+        if p then return "player", p end
+        return "npc", m
+    end
+    return "object", inst
+end
+
+local function updateLaser(laser)
+    if not laser or laser.destroyed then return end
+    if not laser.att or not laser.att.Parent then destroyLaser(laser); return end
+    local origin = laser.att.WorldPosition
+    local rawDir = getAimDir(laser)
+    if not laser.smoothDir then
+        laser.smoothDir = rawDir
+    else
+        local a = math.clamp(CONFIG.AimSmoothing, 0, 0.95)
+        laser.smoothDir = laser.smoothDir:Lerp(rawDir, 1 - a)
+        if laser.smoothDir.Magnitude > 0.001 then
+            laser.smoothDir = laser.smoothDir.Unit
+        else
+            laser.smoothDir = rawDir
+        end
+    end
+    local aimDir = laser.smoothDir
+    local dir = aimDir * CONFIG.MaxDistance
+    origin = origin + aimDir * 0.1
+
+    local hits = {}
+    if CONFIG.LaserPiercing then
+        local co, rem = origin, dir
+        local trav, maxD = 0, dir.Magnitude
+        local p = RaycastParams.new()
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        p.IgnoreWater = true
+        local f = buildFilter()
+        p.FilterDescendantsInstances = f
+        for _ = 1, CONFIG.LaserPierceCount do
+            local r = workspace:Raycast(co, rem, p)
+            if not r then break end
+            table.insert(hits, r)
+            local adv = (r.Position - co).Magnitude + 0.01
+            trav = trav + adv
+            if trav >= maxD then break end
+            co = r.Position + rem.Unit * 0.01
+            rem = rem.Unit * (maxD - trav)
+            table.insert(f, r.Instance)
+            p.FilterDescendantsInstances = f
+        end
+    else
+        rayParams.FilterDescendantsInstances = buildFilter()
+        local s = workspace:Raycast(origin, dir, rayParams)
+        hits = s and { s } or {}
+    end
+
+    local stop = nil
+    if #hits > 0 then
+        if not CONFIG.LaserPiercing then
+            stop = hits[1]
+        else
+            for _, h in ipairs(hits) do
+                local m = h.Instance:FindFirstAncestorOfClass("Model")
+                if m and m:FindFirstChildOfClass("Humanoid") then
+                    stop = h
+                    break
+                end
+            end
+            if not stop then stop = hits[#hits] end
+        end
+    end
+
+    local hitPos, isHit
+    if stop then
+        hitPos = stop.Position
+        isHit = true
+    else
+        hitPos = origin + dir
+        isHit = false
+    end
+
+    laser.p0.CFrame = CFrame.new(origin)
+    laser.p1.CFrame = CFrame.new(hitPos)
+
+    local ht, hT = classifyHit(stop)
+    if isHit then
+        if ht == "player" then
+            laser.beam.Color = ColorSequence.new(CONFIG.BlueColor)
+            laser.dot.Color = CONFIG.PlayerDotColor
+        else
+            laser.beam.Color = ColorSequence.new(CONFIG.RedColor)
+            laser.dot.Color = CONFIG.HitDotColor
+        end
+        laser.dot.CFrame = CFrame.new(hitPos, hitPos + camera.CFrame.LookVector)
+        laser.dot.Transparency = 0
+    else
+        laser.beam.Color = ColorSequence.new(CONFIG.GreenColor)
+        laser.dot.Transparency = 1
+    end
+    if ht == "player" then
+        statusFunc("🎯 ชนผู้เล่น: " .. hT.Name, CONFIG.BlueColor)
+    elseif ht == "npc" then
+        statusFunc("👾 ชน NPC: " .. hT.Name, CONFIG.RedColor)
+    elseif ht == "object" then
+        statusFunc("🧱 ชน: " .. hT.Name, CONFIG.RedColor)
+    else
+        statusFunc(string.format("➡ ระยะไกลสุด %d", math.floor(CONFIG.MaxDistance)), CONFIG.GreenColor)
+    end
+end
+_G.SG_updateLaser = updateLaser
+
+--============================================================
+-- AIMBOT
+--============================================================
+local function hasLOS(fromP, toP, ignore)
+    local p = RaycastParams.new()
+    p.FilterType = Enum.RaycastFilterType.Exclude
+    p.IgnoreWater = true
+    local f = { laserFolder }
+    for _, v in ipairs(ignore or {}) do table.insert(f, v) end
+    p.FilterDescendantsInstances = f
+    return workspace:Raycast(fromP, toP - fromP, p) == nil
+end
+local function predictPos(char, part, t)
+    if t <= 0 then return part.Position end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return part.Position end
+    return part.Position + hrp.AssemblyLinearVelocity * t
+end
+local function findBestTarget(originP, aimDir, maxD)
+    local best, bestS = nil, math.huge
+    local camP = camera.CFrame.Position
+    local camL = camera.CFrame.LookVector
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and not isSameTeam(plr) then
+            local char = plr.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local tp = char:FindFirstChild(CONFIG.AimbotLockPart)
+                    or char:FindFirstChild("HumanoidRootPart")
+                    or char:FindFirstChild("Head")
+                if hum and hum.Health > 0 and tp then
+                    local tPos = predictPos(char, tp, CONFIG.AimbotPredict)
+                    local toT = tPos - originP
+                    if toT.Magnitude <= maxD then
+                        local ang = math.deg(math.acos(math.clamp(toT.Unit:Dot(aimDir), -1, 1)))
+                        local toC = tPos - camP
+                        local cAng = math.deg(math.acos(math.clamp(toC.Unit:Dot(camL), -1, 1)))
+                        if ang <= CONFIG.AimbotFOV / 2 and cAng <= CONFIG.AimbotFOV / 2 then
+                            local ok = true
+                            if CONFIG.AimbotWallCheck then
+                                ok = hasLOS(originP, tPos, { char, player.Character })
+                            end
+                            if ok then
+                                local s = ang + cAng * 0.5
+                                if s < bestS then
+                                    bestS = s
+                                    best = char
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+_G.SG_findBestTarget = findBestTarget
+_G.SG_predictPos = predictPos
+
+--============================================================
+-- GRAPHICS
+--============================================================
+local origGraphics = nil
+local function saveGraphics()
+    if origGraphics then return end
+    origGraphics = {
+        GlobalShadows = Lighting.GlobalShadows,
+        FogEnd = Lighting.FogEnd,
+        FogStart = Lighting.FogStart,
+        Brightness = Lighting.Brightness,
+    }
+end
+local function applyLowGraphics()
+    pcall(function()
+        saveGraphics()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+        for _, obj in ipairs(Lighting:GetChildren()) do
+            if obj:IsA("Atmosphere") then
+                obj.Density = 0
+                obj.Haze = 0
+                obj.Glare = 0
+            elseif obj:IsA("BloomEffect") or obj:IsA("BlurEffect") or obj:IsA("SunRaysEffect") then
+                obj.Enabled = false
+            end
+        end
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+    end)
+end
+local function revertGraphics()
+    pcall(function()
+        if not origGraphics then return end
+        Lighting.GlobalShadows = origGraphics.GlobalShadows
+        Lighting.FogEnd = origGraphics.FogEnd
+        Lighting.FogStart = origGraphics.FogStart
+        Lighting.Brightness = origGraphics.Brightness
+    end)
+end
+_G.SG_applyLowGraphics = applyLowGraphics
+_G.SG_revertGraphics = revertGraphics
+
+--============================================================
+-- ESP SYSTEM
+--============================================================
+local espFolder = Instance.new("Folder")
+espFolder.Name = "__ESP_Container"
+espFolder.Parent = camera
+_G.SG_espFolder = espFolder
+
+local tracerFolder = Instance.new("Folder")
+tracerFolder.Name = "__ESP_Tracers"
+tracerFolder.Parent = espFolder
+
+local espData = {}
+_G.SG_espData = espData
+
+local function destroyESPEntry(model)
+    local entry = espData[model]
+    if not entry then return end
+    if entry.highlight and entry.highlight.Parent then entry.highlight:Destroy() end
+    if entry.billboard and entry.billboard.Parent then entry.billboard:Destroy() end
+    if entry.box and entry.box.folder and entry.box.folder.Parent then entry.box.folder:Destroy() end
+    if entry.tracer then
+        for _, line in ipairs(entry.tracer.lines) do
+            if line and line.Parent then line:Destroy() end
+        end
+    end
+    espData[model] = nil
+end
+_G.SG_destroyESPEntry = destroyESPEntry
+
+local function createBoxESP(model, color)
+    local box = Instance.new("Folder")
+    box.Name = "__ESP_Box"
+    box.Parent = espFolder
+    local lines = {}
+    for i = 1, 4 do
+        local line = Instance.new("Frame")
+        line.BackgroundColor3 = color
+        line.BorderSizePixel = 0
+        line.BackgroundTransparency = 0
+        line.ZIndex = 2
+        line.Visible = true
+        line.Parent = box
+        table.insert(lines, line)
+    end
+    return { folder = box, lines = lines }
+end
+
+local function updateBoxESP(boxData, model, color)
+    if not boxData or not model.Parent then return end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local cf = hrp.CFrame
+    local size = Vector3.new(3, 6, 3)
+    local corners = {
+        cf * Vector3.new(-size.X/2, size.Y/2, 0),
+        cf * Vector3.new(size.X/2, size.Y/2, 0),
+        cf * Vector3.new(size.X/2, -size.Y/2, 0),
+        cf * Vector3.new(-size.X/2, -size.Y/2, 0),
+    }
+    local screenPoints = {}
+    for _, c in ipairs(corners) do
+        local pos, onScreen = camera:WorldToViewportPoint(c)
+        if onScreen then
+            table.insert(screenPoints, Vector2.new(pos.X, pos.Y))
+        end
+    end
+    if #screenPoints < 4 then
+        for _, line in ipairs(boxData.lines) do line.Visible = false end
+        return
+    end
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    for _, p in ipairs(screenPoints) do
+        minX = math.min(minX, p.X)
+        minY = math.min(minY, p.Y)
+        maxX = math.max(maxX, p.X)
+        maxY = math.max(maxY, p.Y)
+    end
+    local w = maxX - minX
+    local h = maxY - minY
+    local lines = boxData.lines
+    lines[1].Visible = true
+    lines[1].Position = UDim2.new(0, minX, 0, minY)
+    lines[1].Size = UDim2.new(0, w, 0, 1)
+    lines[1].BackgroundColor3 = color
+    lines[2].Visible = true
+    lines[2].Position = UDim2.new(0, maxX, 0, minY)
+    lines[2].Size = UDim2.new(0, 1, 0, h)
+    lines[2].BackgroundColor3 = color
+    lines[3].Visible = true
+    lines[3].Position = UDim2.new(0, minX, 0, maxY)
+    lines[3].Size = UDim2.new(0, w, 0, 1)
+    lines[3].BackgroundColor3 = color
+    lines[4].Visible = true
+    lines[4].Position = UDim2.new(0, minX, 0, minY)
+    lines[4].Size = UDim2.new(0, 1, 0, h)
+    lines[4].BackgroundColor3 = color
+end
+
+local function createTracerESP(model, color, origin)
+    local lines = {}
+    for i = 1, 5 do
+        local line = Instance.new("Frame")
+        line.BackgroundColor3 = color
+        line.BorderSizePixel = 0
+        line.ZIndex = 1
+        line.Visible = false
+        line.Parent = tracerFolder
+        table.insert(lines, line)
+    end
+    return { lines = lines, origin = origin }
+end
+
+local function updateTracerESP(tracerData, model, color)
+    if not tracerData or not model.Parent then return end
+    local target = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+    if not target then
+        for _, l in ipairs(tracerData.lines) do l.Visible = false end
+        return
+    end
+    local pos, onScreen = camera:WorldToViewportPoint(target.Position)
+    if not onScreen then
+        for _, l in ipairs(tracerData.lines) do l.Visible = false end
+        return
+    end
+    local startPos
+    if tracerData.origin == "center" then
+        startPos = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    else
+        startPos = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+    end
+    local endPos = Vector2.new(pos.X, pos.Y)
+    local lines = tracerData.lines
+    local segments = #lines
+    for i = 1, segments do
+        local t1 = (i - 1) / segments
+        local t2 = i / segments
+        local p1 = startPos:Lerp(endPos, t1)
+        local p2 = startPos:Lerp(endPos, t2)
+        local dx = p2.X - p1.X
+        local dy = p2.Y - p1.Y
+        local len = math.sqrt(dx * dx + dy * dy)
+        local angle = math.atan2(dy, dx)
+        local line = lines[i]
+        line.Visible = true
+        line.AnchorPoint = Vector2.new(0, 0.5)
+        line.Position = UDim2.new(0, p1.X, 0, p1.Y)
+        line.Size = UDim2.new(0, len, 0, 1)
+        line.Rotation = math.deg(angle)
+        line.BackgroundColor3 = color
+    end
+end
+
+local function createESPEntry(model, color, opts)
+    if not model or espData[model] then return end
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    opts = opts or {}
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "__ESP_HL"
+    highlight.FillColor = color
+    highlight.OutlineColor = color
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = espFolder
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "__ESP_BB"
+    billboard.Size = UDim2.new(0, 180, 0, 44)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.MaxDistance = CONFIG.ESPMaxDist
+    billboard.Parent = espFolder
+    billboard.Adornee = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = model.Name
+    nameLabel.TextColor3 = color
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextSize = 14
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = billboard
+
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.6, 0)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Text = ""
+    distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    distLabel.TextStrokeTransparency = 0
+    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    distLabel.TextSize = 12
+    distLabel.Font = Enum.Font.Gotham
+    distLabel.Parent = billboard
+
+    local entry = {
+        highlight = highlight,
+        billboard = billboard,
+        nameLabel = nameLabel,
+        distLabel = distLabel,
+        color = color,
+        showName = opts.showName,
+        showDistance = opts.showDistance,
+        showHealth = opts.showHealth,
+        showBox = opts.showBox,
+        showTracer = opts.showTracer,
+        isPlayer = opts.isPlayer,
+        isVehicle = opts.isVehicle,
+    }
+
+    if opts.showBox then
+        entry.box = createBoxESP(model, opts.boxColor or color)
+    end
+    if opts.showTracer then
+        entry.tracer = createTracerESP(model, opts.tracerColor or color, opts.tracerOrigin or "bottom")
+    end
+
+    espData[model] = entry
+end
+_G.SG_createESPEntry = createESPEntry
+
+local function updateESPTexts()
+    local camPos = camera.CFrame.Position
+    for model, entry in pairs(espData) do
+        if not model.Parent or not entry.billboard.Parent then
+            destroyESPEntry(model)
+            continue
+        end
+        local hrp = model:FindFirstChild("HumanoidRootPart")
+        local head = model:FindFirstChild("Head")
+        local refPart = head or hrp
+        if not refPart then
+            destroyESPEntry(model)
+            continue
+        end
+        entry.billboard.Adornee = refPart
+        local dist = (refPart.Position - camPos).Magnitude
+        local t = math.clamp(1 - (dist / CONFIG.ESPMaxDist), 0, 1)
+        local size = CONFIG.ESPTextSizeMin + (CONFIG.ESPTextSizeMax - CONFIG.ESPTextSizeMin) * t
+
+        if entry.showName then
+            entry.nameLabel.TextSize = size
+            entry.nameLabel.Text = model.Name
+        else
+            entry.nameLabel.Text = ""
+        end
+
+        local info = {}
+        if entry.showDistance then
+            table.insert(info, string.format("%d m", math.floor(dist)))
+        end
+        if entry.showHealth then
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            if hum then
+                table.insert(info, string.format("HP %d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth)))
+            end
+        end
+        entry.distLabel.Text = table.concat(info, "  •  ")
+        entry.distLabel.TextSize = math.max(8, size - 2)
+
+        if entry.box then
+            updateBoxESP(entry.box, model, entry.color)
+        end
+        if entry.tracer then
+            updateTracerESP(entry.tracer, model, entry.color)
+        end
+    end
+end
+_G.SG_updateESPTexts = updateESPTexts
+
+--============================================================
+-- ESP SCAN FUNCTIONS
+--============================================================
+local function scanPlayerESP()
+    if not CONFIG.PlayerESPEnabled then
+        for model, entry in pairs(espData) do
+            if entry.isPlayer then destroyESPEntry(model) end
+        end
+        return
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            if not (CONFIG.PlayerESPTeamCheck and isSameTeam(plr)) then
+                local char = plr.Character
+                if char and char:FindFirstChild("HumanoidRootPart")
+                    and char:FindFirstChildOfClass("Humanoid")
+                    and char.Humanoid.Health > 0 then
+                    if not espData[char] then
+                        createESPEntry(char, CONFIG.PlayerESPColor, {
+                            showName = CONFIG.PlayerESPShowName,
+                            showDistance = CONFIG.PlayerESPShowDistance,
+                            showHealth = false,
+                            showBox = CONFIG.PlayerESPShowBox,
+                            showTracer = CONFIG.PlayerESPShowTracer,
+                            boxColor = CONFIG.PlayerESPBoxColor,
+                            tracerColor = CONFIG.PlayerESPTracerColor,
+                            tracerOrigin = CONFIG.PlayerESPTracerOrigin,
+                            isPlayer = true,
+                        })
+                    else
+                        local e = espData[char]
+                        e.color = CONFIG.PlayerESPColor
+                        e.highlight.FillColor = CONFIG.PlayerESPColor
+                        e.highlight.OutlineColor = CONFIG.PlayerESPColor
+                    end
+                end
+            else
+                local char = plr.Character
+                if char and espData[char] then destroyESPEntry(char) end
+            end
+        end
+    end
+end
+_G.SG_scanPlayerESP = scanPlayerESP
+
+local function scanBotESP()
+    if not CONFIG.BotESPEnabled then
+        for model, entry in pairs(espData) do
+            if not entry.isPlayer and not entry.isVehicle then destroyESPEntry(model) end
+        end
+        return
+    end
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
+            if hum and hrp and hum.Health > 0 then
+                if not espData[obj] then
+                    createESPEntry(obj, CONFIG.BotESPColor, {
+                        showName = CONFIG.BotESPShowName,
+                        showHealth = CONFIG.BotESPShowHealth,
+                        showBox = CONFIG.BotESPShowBox,
+                        showTracer = CONFIG.BotESPShowTracer,
+                        isPlayer = false,
+                    })
+                end
+            end
+        end
+    end
+end
+_G.SG_scanBotESP = scanBotESP
+
+local function scanVehicleESP()
+    if not CONFIG.VehicleESPEnabled then
+        for model, entry in pairs(espData) do
+            if entry.isVehicle then destroyESPEntry(model) end
+        end
+        return
+    end
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") then
+            local hasSeat = obj:FindFirstChildWhichIsA("VehicleSeat", true)
+            local hasTank = obj.Name:lower():find("tank") or obj.Name:lower():find("vehicle")
+            if (hasSeat or hasTank) and not Players:GetPlayerFromCharacter(obj) then
+                if not espData[obj] then
+                    createESPEntry(obj, CONFIG.VehicleESPColor, {
+                        showName = CONFIG.VehicleESPShowName,
+                        showHealth = CONFIG.VehicleESPShowHealth,
+                        showBox = false,
+                        showTracer = false,
+                        isVehicle = true,
+                    })
+                end
+            end
+        end
+    end
+end
+_G.SG_scanVehicleESP = scanVehicleESP
+
+RunService.Heartbeat:Connect(function()
+    for model, entry in pairs(espData) do
+        if not model.Parent then destroyESPEntry(model) end
+    end
+end)
+
+print("[SG] Part 1/2 โหลดเสร็จ — พร้อมโหลด Part 2/2")--============================================================
+-- SIGMAGOON HUB v2.1 — PART 2/2
+-- UI + Tool Hooks + Main Loop
+--============================================================
+if not _G.SigmaGoonHubRunning then
+    warn("[SG] ต้องรัน Part 1 ก่อน!")
+    return
+end
+
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInput  = game:GetService("UserInputService")
+local Tween      = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local CONFIG = _G.SG_CONFIG
+local laserFolder = _G.SG_laserFolder
+local FPS = _G.SG_FPS
+local FPSWarp = _G.SG_FPSWarp
+local espData = _G.SG_espData
+
+local getHRP = _G.SG_getHRP
+local getHum = _G.SG_getHum
+local safeFindAtt = _G.SG_safeFindAtt
+local createLaser = _G.SG_createLaser
+local destroyLaser = _G.SG_destroyLaser
+local updateLaser = _G.SG_updateLaser
+local findBestTarget = _G.SG_findBestTarget
+local predictPos = _G.SG_predictPos
+local startFly = _G.SG_startFly
+local stopFly = _G.SG_stopFly
+local applyNC = _G.SG_applyNC
+local revertNC = _G.SG_revertNC
+local setInvisible = _G.SG_setInvisible
+local setGodmode = _G.SG_setGodmode
+local applyLowGraphics = _G.SG_applyLowGraphics
+local revertGraphics = _G.SG_revertGraphics
+local tryFPSWarp = _G.SG_tryFPSWarp
+local scanPlayerESP = _G.SG_scanPlayerESP
+local scanBotESP = _G.SG_scanBotESP
+local scanVehicleESP = _G.SG_scanVehicleESP
+local updateESPTexts = _G.SG_updateESPTexts
+local destroyESPEntry = _G.SG_destroyESPEntry
+local setStatusFunc = _G.SG_setStatusFunc
+
+-- Anti-Check เก็บไว้ใน Part 2 เพื่อลดความยาว Part 1
+local ANTI_LOCK = {}
+local function lockFeature(id)
+    ANTI_LOCK[id] = true
+end
+local function unlockFeature(id)
+    ANTI_LOCK[id] = nil
+end
+local function isLocked(id)
+    return ANTI_LOCK[id]
+end
+
+local ANTI_CHECKS = {
+    { id = "walkspeed", name = "WalkSpeed", risk = "ต่ำ", test = function()
+        local h = getHum(); if not h then error("ไม่มี") end
+        local s = h.WalkSpeed; h.WalkSpeed = s + 5; task.wait(0.1); h.WalkSpeed = s
+    end },
+    { id = "jump", name = "JumpPower", risk = "ต่ำ", test = function()
+        local h = getHum(); if not h then error("ไม่มี") end
+        local s = h.JumpPower; h.JumpPower = s + 10; task.wait(0.1); h.JumpPower = s
+    end },
+    { id = "hipheight", name = "HipHeight", risk = "กลาง", test = function()
+        local h = getHum(); if not h then error("ไม่มี") end
+        local s = h.HipHeight; h.HipHeight = s + 0.1; task.wait(0.1); h.HipHeight = s
+    end },
+    { id = "fly_bodyvel", name = "BodyVelocity", risk = "สูง", test = function()
+        local hrp = getHRP(); if not hrp then error("ไม่มี") end
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.zero
+        bv.MaxForce = Vector3.new(1, 1, 1)
+        bv.Parent = hrp
+        task.wait(0.1)
+        bv:Destroy()
+    end },
+    { id = "fly_bodygyro", name = "BodyGyro", risk = "สูง", test = function()
+        local hrp = getHRP(); if not hrp then error("ไม่มี") end
+        local bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(1, 1, 1)
+        bg.Parent = hrp
+        task.wait(0.1)
+        bg:Destroy()
+    end },
+    { id = "cframe_warp_small", name = "CFrame Warp 5s", risk = "กลาง", test = function()
+        local hrp = getHRP(); if not hrp then error("ไม่มี") end
+        local s = hrp.CFrame
+        hrp.CFrame = s + Vector3.new(0, 5, 0)
+        task.wait(0.05)
+        hrp.CFrame = s
+    end },
+    { id = "cframe_warp_big", name = "Warp 100 studs", risk = "สูงมาก", test = function()
+        local hrp = getHRP(); if not hrp then error("ไม่มี") end
+        local s = hrp.CFrame
+        hrp.CFrame = s + Vector3.new(100, 0, 0)
+        task.wait(0.3)
+        if hrp.Parent then hrp.CFrame = s end
+    end },
+    { id = "maxhealth", name = "MaxHealth ∞", risk = "สูง", test = function()
+        local h = getHum(); if not h then error("ไม่มี") end
+        local s = h.MaxHealth
+        h.MaxHealth = math.huge
+        task.wait(0.1)
+        h.MaxHealth = s
+    end },
+    { id = "clear_children", name = "ClearAllChildren", risk = "สูงมาก", test = function()
+        local c = player.Character
+        if not c or not c.ClearAllChildren then error("ไม่มี") end
+    end },
+    { id = "destroy_char", name = "Destroy Char", risk = "สูงสุด", test = function()
+        local c = player.Character
+        if not c or not c.Destroy then error("ไม่มี") end
+    end },
+    { id = "instance_sss", name = "Instance.new SSS", risk = "สูง", test = function()
+        local ok = pcall(function()
+            local p = Instance.new("Part")
+            p.Parent = game:GetService("ServerScriptService")
+            p:Destroy()
+        end)
+        if not ok then error("block") end
+    end },
+    { id = "remote_event", name = "RemoteEvent", risk = "กลาง", test = function()
+        local found = false
+        for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+            if v:IsA("RemoteEvent") then
+                found = true
+                break
+            end
+        end
+        if not found then error("ไม่พบ") end
+    end },
+    { id = "animator", name = "Animator", risk = "กลาง", test = function()
+        local h = getHum()
+        if not h then error("ไม่มี") end
+        if not h:FindFirstChildOfClass("Animator") then error("ไม่มี") end
+    end },
+    { id = "nocollide_part", name = "CanCollide false", risk = "ต่ำ", test = function()
+        local c = player.Character
+        if not c then error("ไม่มี") end
+        local hrp = c:FindFirstChild("HumanoidRootPart")
+        if not hrp then error("ไม่มี HRP") end
+        local s = hrp.CanCollide
+        hrp.CanCollide = false
+        task.wait(0.1)
+        hrp.CanCollide = s
+    end },
+    { id = "transparency", name = "Transparency = 1", risk = "ต่ำ", test = function()
+        local c = player.Character
+        if not c then error("ไม่มี") end
+        for _, d in ipairs(c:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local s = d.Transparency
+                d.Transparency = 1
+                task.wait(0.05)
+                d.Transparency = s
+                break
+            end
+        end
+    end },
+    { id = "vehicle_seat", name = "VehicleSeat", risk = "ต่ำ", test = function()
+        local h = getHum()
+        if not h then error("ไม่มี") end
+        if not h.SeatPart and not h.Sit then error("ไม่มี Seat API") end
+    end },
+    { id = "raycast", name = "Raycast", risk = "ต่ำ", test = function()
+        workspace:Raycast(Vector3.new(0, 100, 0), Vector3.new(0, -200, 0))
+    end },
+    { id = "http_request", name = "HttpService", risk = "กลาง", test = function()
+        if not game:GetService("HttpService") then error("ไม่พบ") end
+    end },
+    { id = "sound_play", name = "Sound:Play", risk = "ต่ำ", test = function()
+        local s = Instance.new("Sound")
+        s.Parent = workspace
+        local ok = pcall(function() s:Play() end)
+        s:Destroy()
+        if not ok then error("block") end
+    end },
+    { id = "camera_cframe", name = "Camera CFrame", risk = "กลาง", test = function()
+        local save = camera.CFrame
+        camera.CFrame = save * CFrame.new(0, 0.01, 0)
+        task.wait(0.05)
+        camera.CFrame = save
+    end },
+}
+
+--============================================================
+-- COLORS
+--============================================================
+local COL = {
+    bg = Color3.fromRGB(15, 15, 18),
+    bg2 = Color3.fromRGB(22, 22, 28),
+    bg3 = Color3.fromRGB(30, 30, 38),
+    accent = Color3.fromRGB(0, 170, 255),
+    text = Color3.fromRGB(235, 235, 240),
+    textDim = Color3.fromRGB(150, 150, 165),
+    on = Color3.fromRGB(0, 200, 100),
+    off = Color3.fromRGB(60, 60, 70),
+    red = Color3.fromRGB(200, 60, 60),
+    green = Color3.fromRGB(0, 255, 80),
+    warn = Color3.fromRGB(255, 180, 60),
+    lock = Color3.fromRGB(90, 90, 90),
+    lockText = Color3.fromRGB(120, 120, 130),
+}
+
+for _, g in ipairs(player:WaitForChild("PlayerGui"):GetChildren()) do
+    if g.Name:find("SIGMAGOON") then g:Destroy() end
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SIGMAGOON_HUB"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = player:WaitForChild("PlayerGui")
+
+print("[SG] Gui สร้างแล้ว")
+
+local mainW, mainH = 660, 440
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, mainW, 0, mainH)
+main.Position = UDim2.new(0.5, -mainW/2, 0.5, -mainH/2)
+main.BackgroundColor3 = COL.bg
+main.BorderSizePixel = 0
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = COL.accent
+mainStroke.Thickness = 1.5
+mainStroke.Transparency = 0.4
+mainStroke.Parent = main
+
+-- Title
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = COL.bg2
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+local titleFix = Instance.new("Frame")
+titleFix.Size = UDim2.new(1, 0, 0, 12)
+titleFix.Position = UDim2.new(0, 0, 1, -12)
+titleFix.BackgroundColor3 = COL.bg2
+titleFix.BorderSizePixel = 0
+titleFix.Parent = titleBar
+
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -140, 1, 0)
+titleText.Position = UDim2.new(0, 16, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "SIGMAGOON HUB  |  v2.1"
+titleText.TextColor3 = COL.text
+titleText.TextSize = 15
+titleText.Font = Enum.Font.GothamBold
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+local collapseBtn = Instance.new("TextButton")
+collapseBtn.Size = UDim2.new(0, 24, 0, 20)
+collapseBtn.Position = UDim2.new(1, -42, 0.5, -10)
+collapseBtn.BackgroundColor3 = COL.red
+collapseBtn.BorderSizePixel = 0
+collapseBtn.Text = "➖"
+collapseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+collapseBtn.TextSize = 13
+collapseBtn.Font = Enum.Font.GothamBold
+collapseBtn.Parent = titleBar
+Instance.new("UICorner", collapseBtn).CornerRadius = UDim.new(0, 5)
+
+-- Sidebar
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 170, 1, -52)
+sidebar.Position = UDim2.new(0, 8, 0, 46)
+sidebar.BackgroundColor3 = COL.bg2
+sidebar.BorderSizePixel = 0
+sidebar.Parent = main
+Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 8)
+
+local profileCard = Instance.new("Frame")
+profileCard.Size = UDim2.new(1, -12, 0, 106)
+profileCard.Position = UDim2.new(0, 6, 0, 6)
+profileCard.BackgroundColor3 = COL.bg3
+profileCard.BorderSizePixel = 0
+profileCard.Parent = sidebar
+Instance.new("UICorner", profileCard).CornerRadius = UDim.new(0, 8)
+
+local avatar = Instance.new("ImageLabel")
+avatar.Size = UDim2.new(0, 42, 0, 42)
+avatar.Position = UDim2.new(0, 8, 0, 8)
+avatar.BackgroundColor3 = COL.bg
+avatar.BorderSizePixel = 0
+avatar.Image = "rbxthumb://type=AvatarHeadShot&id=" .. player.UserId .. "&w=150&h=150"
+avatar.Parent = profileCard
+Instance.new("UICorner", avatar).CornerRadius = UDim.new(0, 8)
+
+local nameLbl = Instance.new("TextLabel")
+nameLbl.Size = UDim2.new(1, -60, 0, 16)
+nameLbl.Position = UDim2.new(0, 56, 0, 8)
+nameLbl.BackgroundTransparency = 1
+nameLbl.Text = player.DisplayName
+nameLbl.TextColor3 = COL.text
+nameLbl.TextSize = 13
+nameLbl.Font = Enum.Font.GothamBold
+nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+nameLbl.Parent = profileCard
+
+local userLbl = Instance.new("TextLabel")
+userLbl.Size = UDim2.new(1, -60, 0, 14)
+userLbl.Position = UDim2.new(0, 56, 0, 24)
+userLbl.BackgroundTransparency = 1
+userLbl.Text = "@" .. player.Name
+userLbl.TextColor3 = COL.accent
+userLbl.TextSize = 11
+userLbl.Font = Enum.Font.Gotham
+userLbl.TextXAlignment = Enum.TextXAlignment.Left
+userLbl.TextTruncate = Enum.TextTruncate.AtEnd
+userLbl.Parent = profileCard
+
+local fpsLbl = Instance.new("TextLabel")
+fpsLbl.Size = UDim2.new(1, -60, 0, 14)
+fpsLbl.Position = UDim2.new(0, 56, 0, 38)
+fpsLbl.BackgroundTransparency = 1
+fpsLbl.Text = "FPS 60"
+fpsLbl.TextColor3 = COL.warn
+fpsLbl.TextSize = 11
+fpsLbl.Font = Enum.Font.GothamBold
+fpsLbl.TextXAlignment = Enum.TextXAlignment.Left
+fpsLbl.Parent = profileCard
+
+local healthText = Instance.new("TextLabel")
+healthText.Size = UDim2.new(1, -16, 0, 14)
+healthText.Position = UDim2.new(0, 8, 0, 58)
+healthText.BackgroundTransparency = 1
+healthText.Text = "Health --/--"
+healthText.TextColor3 = COL.green
+healthText.TextSize = 11
+healthText.Font = Enum.Font.GothamBold
+healthText.TextXAlignment = Enum.TextXAlignment.Left
+healthText.Parent = profileCard
+
+local healthBarBg = Instance.new("Frame")
+healthBarBg.Size = UDim2.new(1, -16, 0, 5)
+healthBarBg.Position = UDim2.new(0, 8, 0, 76)
+healthBarBg.BackgroundColor3 = COL.off
+healthBarBg.BorderSizePixel = 0
+healthBarBg.Parent = profileCard
+Instance.new("UICorner", healthBarBg).CornerRadius = UDim.new(1, 0)
+
+local healthBarFill = Instance.new("Frame")
+healthBarFill.Size = UDim2.new(1, 0, 1, 0)
+healthBarFill.BackgroundColor3 = COL.green
+healthBarFill.BorderSizePixel = 0
+healthBarFill.Parent = healthBarBg
+Instance.new("UICorner", healthBarFill).CornerRadius = UDim.new(1, 0)
+
+local mapLbl = Instance.new("TextLabel")
+mapLbl.Size = UDim2.new(1, -12, 0, 14)
+mapLbl.Position = UDim2.new(0, 6, 0, 88)
+mapLbl.BackgroundTransparency = 1
+mapLbl.Text = "📍 Map: " .. game.PlaceId
+mapLbl.TextColor3 = COL.text
+mapLbl.TextSize = 10
+mapLbl.Font = Enum.Font.GothamBold
+mapLbl.TextXAlignment = Enum.TextXAlignment.Left
+mapLbl.TextTruncate = Enum.TextTruncate.AtEnd
+mapLbl.Parent = sidebar
+
+local idLbl = Instance.new("TextLabel")
+idLbl.Size = UDim2.new(1, -12, 0, 14)
+idLbl.Position = UDim2.new(0, 6, 0, 102)
+idLbl.BackgroundTransparency = 1
+idLbl.Text = "🆔 " .. tostring(game.PlaceId)
+idLbl.TextColor3 = COL.textDimidLbl.TextSize = 10
+idLbl.Font = Enum.Font.Gotham
+idLbl.TextXAlignment = Enum.TextXAlignment.Left
+idLbl.Parent = sidebar
+
+local sidebarBtnHolder = Instance.new("Frame")
+sidebarBtnHolder.Size = UDim2.new(1, -12, 0, 260)
+sidebarBtnHolder.Position = UDim2.new(0, 6, 0, 124)
+sidebarBtnHolder.BackgroundTransparency = 1
+sidebarBtnHolder.Parent = sidebar
+
+-- Content
+local contentArea = Instance.new("Frame")
+contentArea.Size = UDim2.new(1, -186, 1, -52)
+contentArea.Position = UDim2.new(0, 178, 0, 46)
+contentArea.BackgroundColor3 = COL.bg2
+contentArea.BorderSizePixel = 0
+contentArea.Parent = main
+Instance.new("UICorner", contentArea).CornerRadius = UDim.new(0, 8)
+
+local function makePage()
+    local p = Instance.new("ScrollingFrame")
+    p.Size = UDim2.new(1, 0, 1, 0)
+    p.BackgroundTransparency = 1
+    p.BorderSizePixel = 0
+    p.ScrollBarThickness = 3
+    p.ScrollBarImageColor3 = COL.accent
+    p.CanvasSize = UDim2.new(0, 0, 0, 0)
+    p.Visible = false
+    p.Parent = contentArea
+    Instance.new("UICorner", p).CornerRadius = UDim.new(0, 8)
+    return p
+end
+
+local pageMain = makePage()
+local pageMain2 = makePage()
+local pageEyes = makePage()
+local pageBots = makePage()
+local pageVehicle = makePage()
+local pageFPS = makePage()
+local pageAnti = makePage()
+local pageSettings = makePage()
+pageMain.Visible = true
+
+--============================================================
+-- UI BUILDERS
+--============================================================
+local function buildContent(page)
+    local ctx = { y = 10 }
+    function ctx.section(text)
+        local h = Instance.new("Frame")
+        h.Size = UDim2.new(1, -20, 0, 24)
+        h.Position = UDim2.new(0, 10, 0, ctx.y)
+        h.BackgroundColor3 = COL.bg3
+        h.BackgroundTransparency = 0.4
+        h.BorderSizePixel = 0
+        h.Parent = page
+        Instance.new("UICorner", h).CornerRadius = UDim.new(0, 6)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -16, 1, 0)
+        l.Position = UDim2.new(0, 8, 0, 0)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = COL.accent
+        l.TextSize = 12
+        l.Font = Enum.Font.GothamBold
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = h
+        ctx.y = ctx.y + 30
+    end
+    function ctx.label(text, color)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -20, 0, 16)
+        l.Position = UDim2.new(0, 10, 0, ctx.y)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = color or COL.textDim
+        l.TextSize = 11
+        l.Font = Enum.Font.Gotham
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = page
+        ctx.y = ctx.y + 18
+        return l
+    end
+    function ctx.toggle(label, get, set, featureID)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -20, 0, 34)
+        row.Position = UDim2.new(0, 10, 0, ctx.y)
+        row.BackgroundColor3 = COL.bg3
+        row.BackgroundTransparency = 0.4
+        row.BorderSizePixel = 0
+        row.Parent = page
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -60, 1, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = label
+        lbl.TextColor3 = COL.text
+        lbl.TextSize = 12
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = row
+        local sw = Instance.new("TextButton")
+        sw.Size = UDim2.new(0, 40, 0, 20)
+        sw.Position = UDim2.new(1, -48, 0.5, -10)
+        sw.BackgroundColor3 = COL.off
+        sw.BorderSizePixel = 0
+        sw.Text = ""
+        sw.AutoButtonColor = false
+        sw.Parent = row
+        Instance.new("UICorner", sw).CornerRadius = UDim.new(1, 0)
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0, 16, 0, 16)
+        knob.Position = UDim2.new(0, 2, 0.5, -8)
+        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        knob.BorderSizePixel = 0
+        knob.Parent = sw
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+        local function refresh()
+            if featureID and isLocked(featureID) then
+                lbl.TextColor3 = COL.lockText
+                sw.BackgroundColor3 = COL.lock
+                knob.Visible = false
+                sw.Text = "🔒"
+                sw.TextColor3 = COL.lockText
+                sw.TextSize = 12
+                if get() then set(false) end
+            else
+                lbl.TextColor3 = COL.text
+                sw.Text = ""
+                knob.Visible = true
+                if get() then
+                    Tween:Create(sw, TweenInfo.new(0.15), { BackgroundColor3 = COL.on }):Play()
+                    Tween:Create(knob, TweenInfo.new(0.15), { Position = UDim2.new(1, -18, 0.5, -8) }):Play()
+                else
+                    Tween:Create(sw, TweenInfo.new(0.15), { BackgroundColor3 = COL.off }):Play()
+                    Tween:Create(knob, TweenInfo.new(0.15), { Position = UDim2.new(0, 2, 0.5, -8) }):Play()
+                end
+            end
+        end
+
+        sw.MouseButton1Click:Connect(function()
+            if featureID and isLocked(featureID) then return end
+            set(not get())
+            refresh()
+        end)
+        refresh()
+        if featureID then
+            _G["refreshToggle_" .. featureID] = refresh
+        end
+        ctx.y = ctx.y + 38
+    end
+    function ctx.slider(label, minV, maxV, get, set)
+        local holder = Instance.new("Frame")
+        holder.Size = UDim2.new(1, -20, 0, 46)
+        holder.Position = UDim2.new(0, 10, 0, ctx.y)
+        holder.BackgroundColor3 = COL.bg3
+        holder.BackgroundTransparency = 0.4
+        holder.BorderSizePixel = 0
+        holder.Parent = page
+        Instance.new("UICorner", holder).CornerRadius = UDim.new(0, 6)
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -20, 0, 16)
+        lbl.Position = UDim2.new(0, 10, 0, 4)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3 = COL.text
+        lbl.TextSize = 11
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = holder
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.new(1, -20, 0, 5)
+        bg.Position = UDim2.new(0, 10, 0, 28)
+        bg.BackgroundColor3 = COL.off
+        bg.BorderSizePixel = 0
+        bg.Parent = holder
+        Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
+        local fill = Instance.new("Frame")
+        fill.BackgroundColor3 = COL.accent
+        fill.BorderSizePixel = 0
+        fill.Parent = bg
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0, 12, 0, 12)
+        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        knob.BorderSizePixel = 0
+        knob.ZIndex = 2
+        knob.Parent = bg
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+        local function refresh()
+            local v = get()
+            local rel = math.clamp((v - minV) / (maxV - minV), 0, 1)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            knob.Position = UDim2.new(rel, -6, 0.5, -6)
+            lbl.Text = label .. ": " .. tostring(math.floor(v))
+        end
+        local dragging = false
+        local function update(inputX)
+            local rel = math.clamp((inputX - bg.AbsolutePosition.X) / math.max(bg.AbsoluteSize.X, 1), 0, 1)
+            set(minV + rel * (maxV - minV))
+            refresh()
+        end
+        bg.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                update(input.Position.X)
+            end
+        end)
+        UserInput.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                update(input.Position.X)
+            end
+        end)
+        UserInput.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+        refresh()
+        ctx.y = ctx.y + 52
+    end
+    function ctx.button(text, color, callback)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -20, 0, 30)
+        b.Position = UDim2.new(0, 10, 0, ctx.y)
+        b.BackgroundColor3 = color or COL.accent
+        b.BorderSizePixel = 0
+        b.Text = text
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.TextSize = 12
+        b.Font = Enum.Font.GothamBold
+        b.Parent = page
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        if callback then b.MouseButton1Click:Connect(callback) end
+        ctx.y = ctx.y + 36
+        return b
+    end
+    function ctx.colorPicker(label, get, set)
+        local holder = Instance.new("Frame")
+        holder.Size = UDim2.new(1, -20, 0, 34)
+        holder.Position = UDim2.new(0, 10, 0, ctx.y)
+        holder.BackgroundColor3 = COL.bg3
+        holder.BackgroundTransparency = 0.4
+        holder.BorderSizePixel = 0
+        holder.Parent = page
+        Instance.new("UICorner", holder).CornerRadius = UDim.new(0, 6)
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -60, 1, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = label
+        lbl.TextColor3 = COL.text
+        lbl.TextSize = 12
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = holder
+        local preview = Instance.new("Frame")
+        preview.Size = UDim2.new(0, 40, 0, 20)
+        preview.Position = UDim2.new(1, -48, 0.5, -10)
+        preview.BackgroundColor3 = get()
+        preview.BorderSizePixel = 0
+        preview.Parent = holder
+        Instance.new("UICorner", preview).CornerRadius = UDim.new(0, 4)
+        local colors = {
+            Color3.fromRGB(255, 40, 40),
+            Color3.fromRGB(255, 180, 40),
+            Color3.fromRGB(0, 255, 80),
+            Color3.fromRGB(80, 160, 255),
+            Color3.fromRGB(255, 80, 255),
+            Color3.fromRGB(255, 255, 255),
+        }
+        local idx = 1
+        for i, c in ipairs(colors) do
+            if c == get() then
+                idx = i
+                break
+            end
+        end
+        preview.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                idx = idx % #colors + 1
+                set(colors[idx])
+                preview.BackgroundColor3 = colors[idx]
+            end
+        end)
+        ctx.y = ctx.y + 38
+    end
+    function ctx.finalize()
+        page.CanvasSize = UDim2.new(0, 0, 0, ctx.y + 10)
+    end
+    return ctx
+end
+
+--============================================================
+-- PAGE 1: หน้าหลัก
+--============================================================
+local ctxMain = buildContent(pageMain)
+ctxMain.section("⚙ การเคลื่อนไหว")
+ctxMain.toggle("บิน", function() return CONFIG.FlyEnabled end,
+    function(v) CONFIG.FlyEnabled = v; if v then startFly() else stopFly() end end, "fly")
+ctxMain.slider("ความเร็วบิน", 1, 500, function() return CONFIG.FlySpeed end,
+    function(v) CONFIG.FlySpeed = v end)
+ctxMain.toggle("วิ่งเร็ว", function() return CONFIG.SpeedEnabled end,
+    function(v)
+        CONFIG.SpeedEnabled = v
+        if not v then
+            local h = getHum()
+            if h then h.WalkSpeed = 16 end
+        end
+    end, "speed")
+ctxMain.slider("ความเร็ววิ่ง", 16, 500, function() return CONFIG.SpeedValue end,
+    function(v) CONFIG.SpeedValue = v end)
+ctxMain.section("🦘 กระโดด / ซ่อน / อมตะ")
+ctxMain.toggle("กระโดดไม่จำกัด", function() return CONFIG.JumpEnabled end,
+    function(v) CONFIG.JumpEnabled = v end, "jump")
+ctxMain.slider("ความสูงกระโดด", 50, 500, function() return CONFIG.JumpPower end,
+    function(v) CONFIG.JumpPower = v end)
+ctxMain.toggle("เดินทะลุหญ้า", function() return CONFIG.NoCollideEnabled end,
+    function(v) CONFIG.NoCollideEnabled = v; if v then applyNC() else revertNC() end end, "nocollide")
+ctxMain.toggle("หายตัว", function() return CONFIG.InvisibleEnabled end,
+    function(v) CONFIG.InvisibleEnabled = v; setInvisible(v) end, "invisible")
+ctxMain.toggle("อมตะ", function() return CONFIG.GodmodeEnabled end,
+    function(v) CONFIG.GodmodeEnabled = v; setGodmode(v) end, "godmode")
+ctxMain.section("📍 จุดวาร์ป")
+ctxMain.button("💾 ตั้งจุดสปอร์ตปัจจุบัน", COL.on, _G.SG_saveCurrentSpawn)
+ctxMain.button("🚀 วาร์ปไปจุดสปอร์ต", COL.accent, _G.SG_warpToSpawn)
+ctxMain.button("💀 บันทึกจุดตาย", Color3.fromRGB(150, 80, 80), _G.SG_saveDeathPoint)
+ctxMain.button("⚰ วาร์ปไปจุดตาย", Color3.fromRGB(200, 80, 80), _G.SG_warpToDeath)
+ctxMain.button("🗑 เคลียร์", COL.red, _G.SG_clearSpawn)
+ctxMain.section("🌐 Teleport Points")
+local tpListLabel = ctxMain.label("ยังไม่มีจุด", COL.textDim)
+ctxMain.button("➕ เพิ่มจุด", COL.accent, function()
+    _G.SG_addTeleportPoint()
+    tpListLabel.Text = "มี " .. #_G.SG_getTeleportPoints() .. " จุด"
+end)
+ctxMain.button("➖ ลบจุดล่าสุด", COL.warn, function()
+    _G.SG_removeLastTP()
+    tpListLabel.Text = "มี " .. #_G.SG_getTeleportPoints() .. " จุด"
+end)
+for i = 1, 5 do
+    ctxMain.button("➡ วาร์ปไปจุดที่ " .. i, Color3.fromRGB(50, 80, 130), function()
+        _G.SG_warpToTP(i)
+    end)
+end
+ctxMain.section("📊 ข้อมูล")
+local coordsLabel = ctxMain.label("X: 0  Y: 0  Z: 0", COL.warn)
+ctxMain.button("🔄 รายงานพิกัด", COL.accent, function()
+    coordsLabel.Text = _G.SG_reportCoords()
+end)
+ctxMain.finalize()
+
+--============================================================
+-- PAGE 2: หน้าหลัก 2
+--============================================================
+local ctxM2 = buildContent(pageMain2)
+ctxM2.section("🔦 เลเซอร์")
+ctxM2.toggle("เปิดเลเซอร์", function() return CONFIG.LaserEnabled end,
+    function(v) CONFIG.LaserEnabled = v end)
+ctxM2.slider("ระยะเลเซอร์", 10, 1000, function() return CONFIG.MaxDistance end,
+    function(v) CONFIG.MaxDistance = v end)
+ctxM2.section("🎯 AIMBOT")
+ctxM2.toggle("เปิด AIMBOT", function() return CONFIG.AimbotEnabled end,
+    function(v) CONFIG.AimbotEnabled = v; fovCircle.Visible = v end)
+ctxM2.slider("FOV", 10, 180, function() return CONFIG.AimbotFOV end,
+    function(v) CONFIG.AimbotFOV = v; updateFovCircleSize() end)
+ctxM2.slider("ความแรงดูด", 1, 10, function() return CONFIG.AimbotStrength end,
+    function(v) CONFIG.AimbotStrength = v end)
+ctxM2.toggle("เช็คกำแพง", function() return CONFIG.AimbotWallCheck end,
+    function(v) CONFIG.AimbotWallCheck = v end)
+ctxM2.toggle("ไม่ล็อกทีม", function() return CONFIG.AimbotTeamCheck end,
+    function(v) CONFIG.AimbotTeamCheck = v end)
+ctxM2.section("🚀 TP WALK")
+ctxM2.toggle("เปิด TP WALK", function() return CONFIG.TPWalkEnabled end,
+    function(v) CONFIG.TPWalkEnabled = v end)
+ctxM2.slider("ความเร็ว TP", 0, 1000, function() return CONFIG.TPWalkSpeed end,
+    function(v) CONFIG.TPWalkSpeed = v end)
+ctxM2.toggle("กันตกวอยซ์", function() return CONFIG.TPWalkAntiVoid end,
+    function(v) CONFIG.TPWalkAntiVoid = v end)
+ctxM2.toggle("เดินบนน้ำ", function() return CONFIG.TPWalkWaterWalk end,
+    function(v) CONFIG.TPWalkWaterWalk = v end)
+ctxM2.finalize()
+
+--============================================================
+-- PAGE 3: ดวงตาเทพ
+--============================================================
+local ctxEyes = buildContent(pageEyes)
+ctxEyes.section("👁 ดวงตาเทพ (Player ESP)")
+ctxEyes.label("ไฮไลท์ผู้เล่น + ทะลุกำแพง", COL.textDim)
+ctxEyes.toggle("เปิดดวงตาเทพ", function() return CONFIG.PlayerESPEnabled end,
+    function(v) CONFIG.PlayerESPEnabled = v end)
+ctxEyes.colorPicker("สีไฮไลท์", function() return CONFIG.PlayerESPColor end,
+    function(c) CONFIG.PlayerESPColor = c end)
+ctxEyes.toggle("แสดงชื่อ", function() return CONFIG.PlayerESPShowName end,
+    function(v) CONFIG.PlayerESPShowName = v end)
+ctxEyes.toggle("แสดงระยะ", function() return CONFIG.PlayerESPShowDistance end,
+    function(v) CONFIG.PlayerESPShowDistance = v end)
+ctxEyes.toggle("ไม่แสดงเพื่อนทีม", function() return CONFIG.PlayerESPTeamCheck end,
+    function(v) CONFIG.PlayerESPTeamCheck = v end)
+ctxEyes.section("📦 ESP กล่อง + เส้น")
+ctxEyes.toggle("แสดงกล่อง", function() return CONFIG.PlayerESPShowBox end,
+    function(v) CONFIG.PlayerESPShowBox = v end)
+ctxEyes.colorPicker("สีกล่อง", function() return CONFIG.PlayerESPBoxColor end,
+    function(c) CONFIG.PlayerESPBoxColor = c end)
+ctxEyes.toggle("แสดงเส้น", function() return CONFIG.PlayerESPShowTracer end,
+    function(v) CONFIG.PlayerESPShowTracer = v end)
+ctxEyes.colorPicker("สีเส้น", function() return CONFIG.PlayerESPTracerColor end,
+    function(c) CONFIG.PlayerESPTracerColor = c end)
+ctxEyes.section("📏 ขนาดตัวอักษร")
+ctxEyes.slider("ขนาดเล็กสุด", 6, 20, function() return CONFIG.ESPTextSizeMin end,
+    function(v) CONFIG.ESPTextSizeMin = v end)
+ctxEyes.slider("ขนาดใหญ่สุด", 10, 40, function() return CONFIG.ESPTextSizeMax end,
+    function(v) CONFIG.ESPTextSizeMax = v end)
+ctxEyes.slider("ระยะมองไกลสุด", 100, 5000, function() return CONFIG.ESPMaxDist end,
+    function(v) CONFIG.ESPMaxDist = v end)
+ctxEyes.button("🗑 ลบ ESP ผู้เล่น", COL.red, function()
+    for model, entry in pairs(espData) do
+        if entry.isPlayer then destroyESPEntry(model) end
+    end
+end)
+ctxEyes.finalize()
+
+--============================================================
+-- PAGE 4: มองบอท
+--============================================================
+local ctxBots = buildContent(pageBots)
+ctxBots.section("🤖 มองบอท (NPC ESP)")
+ctxBots.label("ไฮไลท์บอท/NPC + ทะลุได้", COL.textDim)
+ctxBots.toggle("เปิดมองบอท", function() return CONFIG.BotESPEnabled end,
+    function(v) CONFIG.BotESPEnabled = v end)
+ctxBots.colorPicker("สีไฮไลท์", function() return CONFIG.BotESPColor end,
+    function(c) CONFIG.BotESPColor = c end)
+ctxBots.toggle("แสดงชื่อบอท", function() return CONFIG.BotESPShowName end,
+    function(v) CONFIG.BotESPShowName = v end)
+ctxBots.toggle("แสดง HP", function() return CONFIG.BotESPShowHealth end,
+    function(v) CONFIG.BotESPShowHealth = v end)
+ctxBots.section("📦 ESP กล่อง + เส้น")
+ctxBots.toggle("แสดงกล่อง", function() return CONFIG.BotESPShowBox end,
+    function(v) CONFIG.BotESPShowBox = v end)
+ctxBots.toggle("แสดงเส้น", function() return CONFIG.BotESPShowTracer end,
+    function(v) CONFIG.BotESPShowTracer = v end)
+ctxBots.button("🔍 สแกนบอทใหม่", COL.accent, function() scanBotESP() end)
+ctxBots.button("🗑 ลบ ESP บอท", COL.red, function()
+    for model, entry in pairs(espData) do
+        if not entry.isPlayer and not entry.isVehicle then destroyESPEntry(model) end
+    end
+end)
+ctxBots.finalize()
+
+--============================================================
+-- PAGE 5: ESP รถถัง
+--============================================================
+local ctxVeh = buildContent(pageVehicle)
+ctxVeh.section("🚗 ESP รถถัง")
+ctxVeh.label("ไฮไลท์รถถัง + HP", COL.textDim)
+ctxVeh.toggle("เปิด ESP รถถัง", function() return CONFIG.VehicleESPEnabled end,
+    function(v) CONFIG.VehicleESPEnabled = v end)
+ctxVeh.colorPicker("สีไฮไลท์", function() return CONFIG.VehicleESPColor end,
+    function(c) CONFIG.VehicleESPColor = c end)
+ctxVeh.toggle("แสดงชื่อ", function() return CONFIG.VehicleESPShowName end,
+    function(v) CONFIG.VehicleESPShowName = v end)
+ctxVeh.toggle("แสดง HP", function() return CONFIG.VehicleESPShowHealth end,
+    function(v) CONFIG.VehicleESPShowHealth = v end)
+ctxVeh.button("🗑 ลบ ESP รถถัง", COL.red, function()
+    for model, entry in pairs(espData) do
+        if entry.isVehicle then destroyESPEntry(model) end
+    end
+end)
+ctxVeh.finalize()
+
+--============================================================
+-- PAGE 6: Auto FPS Warp
+--============================================================
+local ctxFPS = buildContent(pageFPS)
+ctxFPS.section("🎯 Auto FPS Warp")
+ctxFPS.label("FPS ตก → วาร์ปหาจุดดี → ตรวจซ้ำ → วาร์ปกลับ", COL.textDim)
+local fpsLiveLabel = ctxFPS.label("FPS ปัจจุบัน: 60", COL.warn)
+local fpsStatusLabel = ctxFPS.label("สถานะ: ปกติ", COL.green)
+ctxFPS.toggle("เปิด Auto FPS Warp", function() return CONFIG.AutoFPSWarpEnabled end,
+    function(v) CONFIG.AutoFPSWarpEnabled = v end)
+ctxFPS.slider("FPS ต่ำสุด", 5, 120, function() return CONFIG.AutoFPSMin end,
+    function(v) CONFIG.AutoFPSMin = v end)
+ctxFPS.slider("FPS สูงสุด", 30, 240, function() return CONFIG.AutoFPSMax end,
+    function(v) CONFIG.AutoFPSMax = v end)
+ctxFPS.slider("ระยะวาร์ป", 100, 3000, function() return CONFIG.AutoFPSWarpDistance end,
+    function(v) CONFIG.AutoFPSWarpDistance = v end)
+ctxFPS.slider("Cooldown", 1, 30, function() return CONFIG.AutoFPSWarpCooldown end,
+    function(v) CONFIG.AutoFPSWarpCooldown = v end)
+ctxFPS.slider("ตรวจซ้ำ", 1, 10, function() return CONFIG.AutoFPSWarpVerifyCount end,
+    function(v) CONFIG.AutoFPSWarpVerifyCount = v end)
+ctxFPS.toggle("วาร์ปกลับถ้ายังไม่ดี", function() return CONFIG.AutoFPSWarpReturnEnabled end,
+    function(v) CONFIG.AutoFPSWarpReturnEnabled = v end)
+ctxFPS.section("🛡 Anti-Void Platform")
+ctxFPS.slider("ความสูงกันตก", 20, 500, function() return CONFIG.AutoFPSAntiVoidHeight end,
+    function(v) CONFIG.AutoFPSAntiVoidHeight = v end)
+ctxFPS.slider("ขนาดแพลตฟอร์ม", 5, 50, function() return CONFIG.AutoFPSPlatformSize end,
+    function(v) CONFIG.AutoFPSPlatformSize = v end)
+ctxFPS.button("🔍 ทดสอบวาร์ปเดี๋ยวนี้", COL.accent, function()
+    if not FPSWarp.warping then tryFPSWarp() end
+end)
+ctxFPS.button("🏠 วาร์ปกลับจุดเดิม", COL.warn, function()
+    if FPSWarp.returnPoint then
+        local h = getHRP()
+        if h then h.CFrame = FPSWarp.returnPoint end
+        FPSWarp.returnPoint = nil
+    end
+end)
+ctxFPS.button("🗑 ลบแพลตฟอร์ม", COL.red, function()
+    if FPSWarp.onPlatform then
+        FPSWarp.onPlatform:Destroy()
+        FPSWarp.onPlatform = nil
+    end
+end)
+ctxFPS.finalize()
+
+--============================================================
+-- PAGE 7: Anti-Check
+--============================================================
+local ctxAnti = buildContent(pageAnti)
+ctxAnti.section("🛡 ANTI-CHECK ขั้นสูง")
+ctxAnti.label("สแกน + ล็อคสวิตช์ที่ไม่รองรับ", COL.textDim)
+local antiStatusLabel = ctxAnti.label("กดสแกนเพื่อเริ่ม", COL.textDim)
+
+local antiResultHolder = Instance.new("Frame")
+antiResultHolder.Size = UDim2.new(1, -20, 0, 20)
+antiResultHolder.Position = UDim2.new(0, 10, 0, ctxAnti.y)
+antiResultHolder.BackgroundTransparency = 1
+antiResultHolder.Parent = pageAnti
+ctxAnti.y = ctxAnti.y + 20
+local antiY = 0
+
+local function clearAntiResults()
+    for _, c in ipairs(antiResultHolder:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    antiY = 0
+end
+
+local function getRiskColor(risk)
+    if risk:find("สูงสุด") or risk:find("สูงมาก") then return Color3.fromRGB(255, 60, 60) end
+    if risk:find("สูง") then return Color3.fromRGB(255, 120, 40) end
+    if risk:find("กลาง") then return Color3.fromRGB(255, 200, 60) end
+    return Color3.fromRGB(0, 200, 100)
+end
+
+local function addAntiResult(check, ok)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 42)
+    row.Position = UDim2.new(0, 0, 0, antiY)
+    row.BackgroundColor3 = ok and Color3.fromRGB(30, 55, 40) or Color3.fromRGB(55, 30, 30)
+    row.BackgroundTransparency = 0.2
+    row.BorderSizePixel = 0
+    row.Parent = antiResultHolder
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(0, 70, 0, 16)
+    statusLbl.Position = UDim2.new(0, 8, 0, 4)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Text = ok and "✅ ผ่าน" or "🔒 ล็อค"
+    statusLbl.TextColor3 = ok and COL.green or COL.lock
+    statusLbl.TextSize = 11
+    statusLbl.Font = Enum.Font.GothamBold
+    statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    statusLbl.Parent = row
+    local riskLbl = Instance.new("TextLabel")
+    riskLbl.Size = UDim2.new(0, 120, 0, 16)
+    riskLbl.Position = UDim2.new(0, 80, 0, 4)
+    riskLbl.BackgroundTransparency = 1
+    riskLbl.Text = "เสี่ยง: " .. check.risk
+    riskLbl.TextColor3 = getRiskColor(check.risk)
+    riskLbl.TextSize = 11
+    riskLbl.Font = Enum.Font.GothamBold
+    riskLbl.TextXAlignment = Enum.TextXAlignment.Left
+    riskLbl.Parent = row
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Size = UDim2.new(1, -8, 0, 16)
+    nameLbl.Position = UDim2.new(0, 8, 0, 22)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = check.name .. "  [" .. check.id .. "]"
+    nameLbl.TextColor3 = COL.text
+    nameLbl.TextSize = 11
+    nameLbl.Font = Enum.Font.Gotham
+    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    nameLbl.Parent = row
+    antiY = antiY + 46
+    antiResultHolder.Size = UDim2.new(1, -20, 0, antiY)
+    pageAnti.CanvasSize = UDim2.new(0, 0, 0, ctxAnti.y + antiY + 30)
+end
+
+ctxAnti.button("🔍 สแกนทั้งหมด", COL.accent, function()
+    clearAntiResults()
+    antiStatusLabel.Text = "กำลังสแกน..."
+    local lockedCount = 0
+    for _, check in ipairs(ANTI_CHECKS) do
+        local ok = pcall(check.test)
+        addAntiResult(check, ok)
+        if not ok then
+            lockFeature(check.id)
+            lockedCount = lockedCount + 1
+        else
+            unlockFeature(check.id)
+        end
+        task.wait(0.05)
+    end
+    antiStatusLabel.Text = string.format("สแกนเสร็จ — ล็อค %d / %d", lockedCount, #ANTI_CHECKS)
+    for id, _ in pairs(_G) do
+        if type(id) == "string" and id:find("^refreshToggle_") then
+            _G[id]()
+        end
+    end
+end)
+
+ctxAnti.button("🔓 ปลดล็อคทั้งหมด", COL.warn, function()
+    for id, _ in pairs(_G) do
+        if type(id) == "string" and id:find("^refreshToggle_") then
+            _G[id]()
+        end
+    end
+    antiStatusLabel.Text = "ปลดล็อคทั้งหมดแล้ว"
+end)
+
+ctxAnti.label("⚠ สวิตช์ 🔒 = ไม่รองรับในเกมนี้", COL.warn)
+ctxAnti.finalize()
+
+--============================================================
+-- PAGE 8: ตั้งค่า
+--============================================================
+local ctxSet = buildContent(pageSettings)
+ctxSet.section("🎨 กราฟฟิก")
+ctxSet.toggle("ลดกราฟฟิก", function() return CONFIG.AutoLowGraphics end,
+    function(v) CONFIG.AutoLowGraphics = v; if v then applyLowGraphics() else revertGraphics() end end)
+ctxSet.button("🌙 ลดกราฟฟิกแรงสุด", Color3.fromRGB(80, 60, 140), function()
+    applyLowGraphics()
+    CONFIG.AutoLowGraphics = true
+end)
+ctxSet.button("☀ คืนค่ากราฟฟิกเดิม", COL.warn, function()
+    revertGraphics()
+    CONFIG.AutoLowGraphics = false
+end)
+ctxSet.finalize()
+
+--============================================================
+-- FOV Circle
+--============================================================
+local fovCircle = Instance.new("Frame")
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovCircle.BackgroundTransparency = 1
+fovCircle.Visible = false
+fovCircle.ZIndex = 5
+fovCircle.Parent = gui
+Instance.new("UICorner", fovCircle).CornerRadius = UDim.new(1, 0)
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Color = COL.warn
+fovStroke.Thickness = 1.6
+fovStroke.Transparency = 0.4
+fovStroke.Parent = fovCircle
+local function updateFovCircleSize()
+    local vp = camera.ViewportSize
+    local camFov = math.rad(camera.FieldOfView)
+    local halfFovRad = math.rad(CONFIG.AimbotFOV / 2)
+    local radiusPx = (math.tan(halfFovRad) / math.tan(camFov / 2)) * (vp.Y / 2)
+    fovCircle.Size = UDim2.new(0, radiusPx * 2, 0, radiusPx * 2)
+end
+updateFovCircleSize()
+
+--============================================================
+-- Status Bar
+--============================================================
+local statusFrame = Instance.new("Frame")
+statusFrame.Size = UDim2.new(0, 340, 0, 38)
+statusFrame.Position = UDim2.new(0.5, -170, 0, 12)
+statusFrame.BackgroundColor3 = COL.bg
+statusFrame.BackgroundTransparency = 0.15
+statusFrame.BorderSizePixel = 0
+statusFrame.Parent = gui
+Instance.new("UICorner", statusFrame).CornerRadius = UDim.new(0, 8)
+local statusStroke = Instance.new("UIStroke")
+statusStroke.Color = COL.green
+statusStroke.Thickness = 1.5
+statusStroke.Transparency = 0.3
+statusStroke.Parent = statusFrame
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -14, 0, 18)
+statusLabel.Position = UDim2.new(0, 7, 0, 2)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "⚫ ไม่มีเป้า"
+statusLabel.TextColor3 = COL.text
+statusLabel.TextSize = 12
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = statusFrame
+local gunLabel = Instance.new("TextLabel")
+gunLabel.Size = UDim2.new(1, -14, 0, 14)
+gunLabel.Position = UDim2.new(0, 7, 0, 20)
+gunLabel.BackgroundTransparency = 1
+gunLabel.Text = "🔫 ไม่ได้ถืออาวุธ"
+gunLabel.TextColor3 = COL.warn
+gunLabel.TextSize = 10
+gunLabel.Font = Enum.Font.Gotham
+gunLabel.TextXAlignment = Enum.TextXAlignment.Left
+gunLabel.Parent = statusFrame
+
+local currentStatusColor = COL.green
+setStatusFunc(function(text, color)
+    statusLabel.Text = text
+    statusStroke.Color = color
+    if currentStatusColor ~= color then
+        currentStatusColor = color
+        statusFrame.BackgroundColor3 = color:Lerp(COL.bg, 0.85)
+        Tween:Create(statusFrame, TweenInfo.new(0.3), { BackgroundColor3 = COL.bg }):Play()
+    end
+end)
+
+--============================================================
+-- Sidebar
+--============================================================
+local function makeSidebarBtn(text, yPos, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 28)
+    b.Position = UDim2.new(0, 0, 0, yPos)
+    b.BackgroundColor3 = COL.bg3
+    b.BackgroundTransparency = 0.5
+    b.BorderSizePixel = 0
+    b.Text = "   " .. text
+    b.TextColor3 = COL.textDim
+    b.TextSize = 11
+    b.Font = Enum.Font.GothamBold
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    b.Parent = sidebarBtnHolder
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    b.MouseButton1Click:Connect(callback)
+    return b
+end
+local function setActiveBtn(btn, active)
+    if active then
+        Tween:Create(btn, TweenInfo.new(0.15), {
+            BackgroundColor3 = COL.accent,
+            BackgroundTransparency = 0,
+            TextColor3 = Color3.fromRGB(255, 255, 255),
+        }):Play()
+    else
+        Tween:Create(btn, TweenInfo.new(0.15), {
+            BackgroundColor3 = COL.bg3,
+            BackgroundTransparency = 0.5,
+            TextColor3 = COL.textDim,
+        }):Play()
+    end
+end
+local pages = { pageMain, pageMain2, pageEyes, pageBots, pageVehicle, pageFPS, pageAnti, pageSettings }
+local btns = {}
+local function showPage(idx)
+    for i, p in ipairs(pages) do p.Visible = (i == idx) end
+    for i, b in ipairs(btns) do setActiveBtn(b, i == idx) end
+end
+local bMain = makeSidebarBtn("🏠  หน้าหลัก", 0, function() showPage(1) end)
+local bMain2 = makeSidebarBtn("⚡  หน้าหลัก 2", 32, function() showPage(2) end)
+local bEyes = makeSidebarBtn("👁  ดวงตาเทพ", 64, function() showPage(3) end)
+local bBots = makeSidebarBtn("🤖  มองบอท", 96, function() showPage(4) end)
+local bVeh = makeSidebarBtn("🚗  ESP รถถัง", 128, function() showPage(5) end)
+local bFPS = makeSidebarBtn("🎯  FPS Warp", 160, function() showPage(6) end)
+local bAnti = makeSidebarBtn("🛡  Anti-Check", 192, function() showPage(7) end)
+local bSet = makeSidebarBtn("⚙  ตั้งค่า", 224, function() showPage(8) end)
+btns = { bMain, bMain2, bEyes, bBots, bVeh, bFPS, bAnti, bSet }
+showPage(1)
+
+--============================================================
+-- Collapse + Drag
+--============================================================
+local miniBtn = Instance.new("TextButton")
+miniBtn.Size = UDim2.new(0, 170, 0, 36)
+miniBtn.Position = UDim2.new(1, -182, 0, 12)
+miniBtn.BackgroundColor3 = COL.bg2
+miniBtn.BackgroundTransparency = 0.05
+miniBtn.BorderSizePixel = 0
+miniBtn.Text = "⚡ SIGMAGOON HUB"
+miniBtn.TextColor3 = COL.text
+miniBtn.TextSize = 13
+miniBtn.Font = Enum.Font.GothamBold
+miniBtn.Visible = false
+miniBtn.ZIndex = 200
+miniBtn.Parent = gui
+Instance.new("UICorner", miniBtn).CornerRadius = UDim.new(0, 8)
+collapseBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    miniBtn.Visible = true
+end)
+miniBtn.MouseButton1Click:Connect(function()
+    main.Visible = true
+    miniBtn.Visible = false
+    main.Position = UDim2.new(0.5, -mainW/2, 0.5, -mainH/2)
+end)
+
+local dragging, dragStart, startPos
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+UserInput.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+--============================================================
+-- FPS counter + Profile
+--============================================================
+RunService.RenderStepped:Connect(function()
+    fpsLbl.Text = "FPS " .. FPS.value
+    if fpsLiveLabel then
+        fpsLiveLabel.Text = "FPS ปัจจุบัน: " .. FPS.value
+        if FPS.value < CONFIG.AutoFPSMin then
+            fpsStatusLabel.Text = "⚠ FPS ตก!"
+            fpsStatusLabel.TextColor3 = COL.red
+        elseif FPS.value >= CONFIG.AutoFPSMax then
+            fpsStatusLabel.Text = "✅ FPS ดี"
+            fpsStatusLabel.TextColor3 = COL.green
+        else
+            fpsStatusLabel.Text = "• FPS ปกติ"
+            fpsStatusLabel.TextColor3 = COL.warn
+        end
+    end
+end)
+
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.3)
+        local hum = getHum()
+        if hum then
+            local h = math.floor(hum.Health)
+            local m = math.floor(hum.MaxHealth)
+            if m == math.huge or m > 100000 then
+                healthText.Text = "Health ∞/∞"
+                healthBarFill.Size = UDim2.new(1, 0, 1, 0)
+                healthBarFill.BackgroundColor3 = COL.green
+            else
+                healthText.Text = "Health " .. h .. "/" .. m
+                local rel = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                healthBarFill.Size = UDim2.new(rel, 0, 1, 0)
+                if rel > 0.5 then
+                    healthBarFill.BackgroundColor3 = COL.green
+                elseif rel > 0.2 then
+                    healthBarFill.BackgroundColor3 = COL.warn
+                else
+                    healthBarFill.BackgroundColor3 = COL.red
+                end
+            end
+        end
+        local hrp = getHRP()
+        if hrp and coordsLabel then
+            local p = hrp.Position
+            coordsLabel.Text = string.format("X: %.0f  Y: %.0f  Z: %.0f", p.X, p.Y, p.Z)
+        end
+    end
+end)
+
+--============================================================
+-- ESP Loop
+--============================================================
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.15)
+        pcall(function()
+            scanPlayerESP()
+            scanBotESP()
+            scanVehicleESP()
+            updateESPTexts()
+        end)
+    end
+end)
+
+--============================================================
+-- Tool hooks
+--============================================================
+local toolLaser, vehicleLaser = nil, nil
+local toolConns, charConns = {}, {}
+local function clearToolLaser() destroyLaser(toolLaser); toolLaser = nil end
+local function clearVehicleLaser() destroyLaser(vehicleLaser); vehicleLaser = nil end
+local function disconnectAll(list)
+    for _, c in ipairs(list) do
+        if typeof(c) == "RBXScriptConnection" then c:Disconnect() end
+    end
+    table.clear(list)
+end
+
+local function attachToolLaser(tool)
+    clearToolLaser()
+    if gunLabel then
+        gunLabel.Text = tool and ("🔫 " .. tool.Name) or "🔫 ไม่ได้ถืออาวุธ"
+    end
+    if not tool or not tool.Parent then return end
+    local att = safeFindAtt(tool, CONFIG.MuzzleNames)
+    if not att and CONFIG.FallbackToHandle then
+        local handle = tool:FindFirstChild("Handle")
+        if handle then
+            att = Instance.new("Attachment")
+            att.Name = "__LSAuto"
+            att.CFrame = CFrame.new(0, 0, -handle.Size.Z * 0.5)
+            att.Parent = handle
+        end
+    end
+    if not att then return end
+    toolLaser = createLaser(att)
+end
+
+local function hookTool(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    table.insert(toolConns, tool.Equipped:Connect(function() attachToolLaser(tool) end))
+    table.insert(toolConns, tool.Unequipped:Connect(function()
+        if toolLaser and toolLaser.att and toolLaser.att:IsDescendantOf(tool) then
+            clearToolLaser()
+            if gunLabel then gunLabel.Text = "🔫 ไม่ได้ถืออาวุธ" end
+        end
+    end))
+    local hum = getHum()
+    if hum and hum.EquippedTool == tool then attachToolLaser(tool) end
+end
+
+local function attachVehicleLaser(seat)
+    clearVehicleLaser()
+    if not seat then return end
+    local vm = seat:FindFirstAncestorOfClass("Model")
+    local att = safeFindAtt(vm, CONFIG.VehicleMuzzleNames)
+        or safeFindAtt(seat, CONFIG.VehicleMuzzleNames)
+    if not att then return end
+    vehicleLaser = createLaser(att)
+end
+
+local function hookCharacter(character)
+    clearToolLaser()
+    clearVehicleLaser()
+    disconnectAll(toolConns)
+    disconnectAll(charConns)
+    if gunLabel then gunLabel.Text = "🔫 ไม่ได้ถืออาวุธ" end
+    for _, c in ipairs(character:GetChildren()) do
+        if c:IsA("Tool") then hookTool(c) end
+    end
+    table.insert(charConns, character.ChildAdded:Connect(function(c)
+        if c:IsA("Tool") then hookTool(c) end
+    end))
+    table.insert(charConns, character.ChildRemoved:Connect(function(c)
+        if c:IsA("Tool") and toolLaser and toolLaser.att and toolLaser.att:IsDescendantOf(c) then
+            clearToolLaser()
+        end
+    end))
+    local hum = character:WaitForChild("Humanoid", 10)
+    if hum then
+        table.insert(charConns, hum.Seated:Connect(function(isSeated, seat)
+            if isSeated and seat then
+                task.defer(function() attachVehicleLaser(seat) end)
+            else
+                clearVehicleLaser()
+            end
+        end))
+    end
+    if CONFIG.InvisibleEnabled then setInvisible(true) end
+    if CONFIG.GodmodeEnabled then setGodmode(true) end
+end
+
+if player.Character then hookCharacter(player.Character) end
+player.CharacterAdded:Connect(hookCharacter)
+player.CharacterRemoving:Connect(function()
+    clearToolLaser()
+    clearVehicleLaser()
+    disconnectAll(toolConns)
+    disconnectAll(charConns)
+end)
+
+--============================================================
+-- Main loop
+--============================================================
+RunService.RenderStepped:Connect(function()
+    if CONFIG.AimbotEnabled then updateFovCircleSize() end
+    if not CONFIG.LaserEnabled then
+        if toolLaser then clearToolLaser() end
+        if vehicleLaser then clearVehicleLaser() end
+        return
+    end
+    if toolLaser then
+        if toolLaser.destroyed then toolLaser = nil
+        else updateLaser(toolLaser) end
+    end
+    if vehicleLaser then
+        if vehicleLaser.destroyed then vehicleLaser = nil
+        else updateLaser(vehicleLaser) end
+    end
+    if CONFIG.AimbotEnabled then
+        local act = toolLaser or vehicleLaser
+        if act and act.att and act.att.Parent then
+            local origin = act.att.WorldPosition
+            local aimDir = act.smoothDir or camera.CFrame.LookVector
+            if origin then
+                local target = findBestTarget(origin, aimDir, CONFIG.AimbotMaxDist)
+                if target then
+                    local lockPart = target:FindFirstChild(CONFIG.AimbotLockPart)
+                        or target:FindFirstChild("HumanoidRootPart")
+                        or target:FindFirstChild("Head")
+                    if lockPart then
+                        local tp = predictPos(target, lockPart, CONFIG.AimbotPredict)
+                        local desired = CFrame.new(camera.CFrame.Position, tp)
+                        local sa = CONFIG.AimbotStrength / 10
+                        local ba = 1 - CONFIG.AimbotSmooth
+                        local fa = math.clamp(ba * (0.3 + sa * 1.2), 0.02, 1)
+                        camera.CFrame = camera.CFrame:Lerp(desired, fa)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+print("[SIGMAGOON HUB v2.1] พร้อมใช้งาน")
+print("  ✅ ESP: ดวงตาเทพ + มองบอท + ESP รถถัง + Box + Tracer")
+print("  ✅ Anti-Check ขั้นสูง + ล็อคสวิตช์อัตโนมัติ")
+print("  ✅ Auto FPS Warp + Anti-Void Platform")
+print("  ✅ มี 8 หน้าเมนู")
