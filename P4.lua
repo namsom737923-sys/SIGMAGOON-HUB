@@ -1,5 +1,5 @@
 --============================================================
--- SIGMAGOON HUB v7.0 — P4 (Player List + 3D Preview + Extras)
+-- SIGMAGOON HUB v8.0 — P4 (Player List + 3D Preview + Server Hop)
 --============================================================
 if not _G.SG5_P3 then
     warn("[SG] ต้องรัน P3 ก่อน!")
@@ -14,7 +14,6 @@ local Tween      = game:GetService("TweenService")
 local CoreGui    = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local StarterGui = game:GetService("StarterGui")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -24,16 +23,17 @@ local getHRP = _G.SG_getHRP
 local isSameTeam = _G.SG_isSameTeam
 local COL = _G.SG_COL
 local notify = _G.SG_notify
+local makeSidebarBtn = _G.SG_makeSidebarBtn
 
-print("[SG v7.0] P4 เริ่มโหลด")
+print("[SG v8.0] P4 เริ่มโหลด")
 
 --============================================================
 -- SERVER HOP
 --============================================================
 _G.SG_ServerHop = function()
     local placeId = game.PlaceId
-    notify("🌐 กำลังหาเซิร์ฟเวอร์ใหม่...", Color3.fromRGB(0, 200, 255))
-    
+    if notify then notify("🌐 กำลังหาเซิร์ฟเวอร์ใหม่...", Color3.fromRGB(0, 200, 255)) end
+
     local function getServers()
         local url = "https://games.roblox.com/v1/games/" .. placeId 
             .. "/servers/Public?sortOrder=Asc&limit=100"
@@ -43,27 +43,27 @@ _G.SG_ServerHop = function()
         if ok and result and result.data then return result.data end
         return nil
     end
-    
+
     local servers = getServers()
     if not servers then
-        notify("❌ ดึงข้อมูลไม่ได้", Color3.fromRGB(255, 60, 60))
+        if notify then notify("❌ ดึงข้อมูลไม่ได้", Color3.fromRGB(255, 60, 60)) end
         return
     end
-    
+
     for _, server in ipairs(servers) do
         if server.playing < server.maxPlayers and server.id ~= game.JobId then
-            notify("✅ พบเซิร์ฟเวอร์ — กำลังย้าย...", Color3.fromRGB(0, 255, 100))
+            if notify then notify("✅ พบเซิร์ฟเวอร์ — กำลังย้าย...", Color3.fromRGB(0, 255, 100)) end
             pcall(function()
                 TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
             end)
             return
         end
     end
-    notify("⚠ ไม่พบเซิร์ฟเวอร์ว่าง", Color3.fromRGB(255, 180, 60))
+    if notify then notify("⚠ ไม่พบเซิร์ฟเวอร์ว่าง", Color3.fromRGB(255, 180, 60)) end
 end
 
 --============================================================
--- 3D PLAYER PREVIEW SYSTEM
+-- 3D PLAYER PREVIEW
 --============================================================
 local previewFolder = Instance.new("Folder")
 previewFolder.Name = "__SG_Preview"
@@ -77,28 +77,28 @@ _G.SG_showPlayerPreview = function(targetPlayer, previewPosition)
         previewModels[targetPlayer]:Destroy()
         previewModels[targetPlayer] = nil
     end
-    
+
     if not targetPlayer or not targetPlayer.Character then
-        notify("❌ ผู้เล่นไม่มีตัวละคร", Color3.fromRGB(255, 60, 60))
+        if notify then notify("❌ ผู้เล่นไม่มีตัวละคร", Color3.fromRGB(255, 60, 60)) end
         return
     end
-    
+
     local char = targetPlayer.Character
     local clone = char:Clone()
     clone.Name = "Preview_" .. targetPlayer.Name
-    
+
     -- ลบ Scripts/Animations
     for _, v in ipairs(clone:GetDescendants()) do
-        if v:IsA("Script") or v:IsA("LocalScript") 
+        if v:IsA("Script") or v:IsA("LocalScript")
             or v:IsA("Animator") or v:IsA("Animation") then
             v:Destroy()
         end
     end
-    
-    -- ลบ Humanoid (เพื่อไม่ให้มี Physics)
+
+    -- ลบ Humanoid
     local hum = clone:FindFirstChildOfClass("Humanoid")
     if hum then hum:Destroy() end
-    
+
     -- Anchor ทุก BasePart
     for _, v in ipairs(clone:GetDescendants()) do
         if v:IsA("BasePart") then
@@ -106,15 +106,17 @@ _G.SG_showPlayerPreview = function(targetPlayer, previewPosition)
             v.CanCollide = false
         end
     end
-    
+
     -- ตั้งตำแหน่ง
-    local hrp = clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChild("Head") or clone.PrimaryPart
+    local hrp = clone:FindFirstChild("HumanoidRootPart") 
+        or clone:FindFirstChild("Head") 
+        or clone.PrimaryPart
     if hrp then
         hrp.CFrame = CFrame.new(previewPosition or (camera.CFrame.Position + camera.CFrame.LookVector * 10))
         clone.PrimaryPart = hrp
     end
-    
-    -- เพิ่มป้ายชื่อ
+
+    -- ป้ายชื่อ
     local head = clone:FindFirstChild("Head")
     if head then
         local billboard = Instance.new("BillboardGui")
@@ -123,17 +125,18 @@ _G.SG_showPlayerPreview = function(targetPlayer, previewPosition)
         billboard.Adornee = head
         billboard.AlwaysOnTop = true
         billboard.Parent = clone
-        
+
         local nameLbl = Instance.new("TextLabel")
         nameLbl.Size = UDim2.new(1, 0, 0.5, 0)
         nameLbl.BackgroundTransparency = 1
         nameLbl.Text = targetPlayer.DisplayName
         nameLbl.TextColor3 = Color3.fromRGB(0, 200, 255)
         nameLbl.TextStrokeTransparency = 0
+        nameLbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
         nameLbl.TextSize = 16
         nameLbl.Font = Enum.Font.GothamBold
         nameLbl.Parent = billboard
-        
+
         local infoLbl = Instance.new("TextLabel")
         infoLbl.Size = UDim2.new(1, 0, 0.5, 0)
         infoLbl.Position = UDim2.new(0, 0, 0.5, 0)
@@ -141,14 +144,15 @@ _G.SG_showPlayerPreview = function(targetPlayer, previewPosition)
         infoLbl.Text = "@" .. targetPlayer.Name
         infoLbl.TextColor3 = Color3.fromRGB(200, 200, 220)
         infoLbl.TextStrokeTransparency = 0
+        infoLbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
         infoLbl.TextSize = 12
         infoLbl.Font = Enum.Font.Gotham
         infoLbl.Parent = billboard
     end
-    
+
     clone.Parent = previewFolder
     previewModels[targetPlayer] = clone
-    
+
     -- หมุนช้า ๆ
     task.spawn(function()
         local rot = 0
@@ -161,7 +165,7 @@ _G.SG_showPlayerPreview = function(targetPlayer, previewPosition)
             end
         end
     end)
-    
+
     return clone
 end
 
@@ -185,20 +189,20 @@ end
 _G.SG_TeleportToPlayer = function(targetPlayer)
     if not targetPlayer then return end
     if targetPlayer == player then
-        notify("❌ วาร์ปไปตัวเองไม่ได้", Color3.fromRGB(255, 60, 60))
+        if notify then notify("❌ วาร์ปไปตัวเองไม่ได้", Color3.fromRGB(255, 60, 60)) end
         return
     end
     if not targetPlayer.Character then
-        notify("❌ ผู้เล่นไม่มีตัวละคร", Color3.fromRGB(255, 60, 60))
+        if notify then notify("❌ ผู้เล่นไม่มีตัวละคร", Color3.fromRGB(255, 60, 60)) end
         return
     end
-    
+
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     local myHRP = getHRP()
     if not targetHRP or not myHRP then return end
-    
+
     myHRP.CFrame = targetHRP.CFrame * CFrame.new(0, 0, -5)
-    notify("🌍 วาร์ปไปหา: " .. targetPlayer.Name, Color3.fromRGB(0, 200, 255))
+    if notify then notify("🌍 วาร์ปไปหา: " .. targetPlayer.Name, Color3.fromRGB(0, 200, 255)) end
 end
 
 --============================================================
@@ -206,15 +210,14 @@ end
 --============================================================
 _G.SG_CopyPlayerInfo = function(targetPlayer)
     if not targetPlayer then return end
-    
+
     local info = "=== PLAYER INFO ===\n"
     info = info .. "Name: " .. targetPlayer.Name .. "\n"
     info = info .. "DisplayName: " .. targetPlayer.DisplayName .. "\n"
     info = info .. "UserId: " .. targetPlayer.UserId .. "\n"
     info = info .. "AccountAge: " .. targetPlayer.AccountAge .. " days\n"
     info = info .. "Team: " .. (targetPlayer.Team and targetPlayer.Team.Name or "None") .. "\n"
-    info = info .. "Membership: " .. (targetPlayer.MembershipType.Name or "None") .. "\n"
-    
+
     if targetPlayer.Character then
         local hrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
@@ -225,52 +228,14 @@ _G.SG_CopyPlayerInfo = function(targetPlayer)
             info = info .. "Health: " .. math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth) .. "\n"
         end
     end
-    
+
     if setclipboard then
         setclipboard(info)
-        notify("📋 คัดลอกข้อมูล " .. targetPlayer.Name, Color3.fromRGB(0, 255, 100))
+        if notify then notify("📋 คัดลอกข้อมูล " .. targetPlayer.Name, Color3.fromRGB(0, 255, 100)) end
     else
-        notify("❌ ไม่รองรับ clipboard", Color3.fromRGB(255, 60, 60))
+        if notify then notify("❌ ไม่รองรับ clipboard", Color3.fromRGB(255, 60, 60)) end
     end
     return info
-end
-
---============================================================
--- SCREENSHOT
---============================================================
-_G.SG_Screenshot = function()
-    local hiddenGuis = {}
-    for _, g in ipairs(CoreGui:GetChildren()) do
-        if g:IsA("ScreenGui") and (g.Name:find("SIGMAGOON") or g.Name:find("SG_")) then
-            hiddenGuis[g] = g.Enabled
-            g.Enabled = false
-        end
-    end
-    
-    task.wait(0.2)
-    
-    local fileName = "sigmagoon_" .. os.time() .. ".png"
-    local ok = pcall(function()
-        if captureScreenshot then
-            captureScreenshot(fileName)
-        elseif screenshot then
-            screenshot(fileName)
-        else
-            error("ไม่รองรับ")
-        end
-    end)
-    
-    task.wait(0.1)
-    
-    for g, enabled in pairs(hiddenGuis) do
-        if g and g.Parent then g.Enabled = enabled end
-    end
-    
-    if ok then
-        notify("📸 บันทึกภาพแล้ว", Color3.fromRGB(0, 255, 100))
-    else
-        notify("❌ ไม่รองรับ Screenshot", Color3.fromRGB(255, 60, 60))
-    end
 end
 
 --============================================================
@@ -286,27 +251,29 @@ if not sgHub then
     end
 end
 
-if not sgHub then
-    warn("[SG] ไม่พบ SIGMAGOON_HUB")
-    return
-end
+if not sgHub then warn("[SG v8.0] ไม่พบ SIGMAGOON_HUB"); return end
 
 local main = sgHub:FindFirstChild("Main")
 local contentArea = main and main:FindFirstChild("ContentArea")
-if not contentArea then
-    warn("[SG] ไม่พบ ContentArea")
-    return
-end
+local sidebarBtnHolder = main and main.Sidebar and main.Sidebar:FindFirstChild("sidebarBtnHolder")
 
--- สร้างหน้า Players
+if not contentArea then warn("[SG v8.0] ไม่พบ ContentArea"); return end
+
+-- ลบหน้า Players เก่า (ถ้ามี)
+local oldPlayers = contentArea:FindFirstChild("PagePlayers")
+if oldPlayers then oldPlayers:Destroy() end
+
+-- สร้างหน้า Players ใหม่เป็น ScrollingFrame (เลื่อนได้)
 local pagePlayers = Instance.new("ScrollingFrame")
 pagePlayers.Name = "PagePlayers"
 pagePlayers.Size = UDim2.new(1, 0, 1, 0)
 pagePlayers.BackgroundTransparency = 1
 pagePlayers.BorderSizePixel = 0
-pagePlayers.ScrollBarThickness = 3
+pagePlayers.ScrollBarThickness = 4
 pagePlayers.ScrollBarImageColor3 = COL.accent
 pagePlayers.CanvasSize = UDim2.new(0, 0, 0, 0)
+pagePlayers.AutomaticCanvasSize = Enum.AutomaticSize.Y
+pagePlayers.ScrollingDirection = Enum.ScrollingDirection.Y
 pagePlayers.Visible = false
 pagePlayers.Parent = contentArea
 Instance.new("UICorner", pagePlayers).CornerRadius = UDim.new(0, 8)
@@ -331,11 +298,13 @@ headerLabel.Font = Enum.Font.GothamBold
 headerLabel.TextXAlignment = Enum.TextXAlignment.Left
 headerLabel.Parent = header
 
--- Player list holder
+-- List holder (ใช้ AutomaticSize)
 local listHolder = Instance.new("Frame")
-listHolder.Size = UDim2.new(1, -20, 1, -55)
-listHolder.Position = UDim2.new(0, 10, 0, 45)
+listHolder.Name = "ListHolder"
+listHolder.Size = UDim2.new(1, -20, 0, 0)
+listHolder.Position = UDim2.new(0, 10, 0, 50)
 listHolder.BackgroundTransparency = 1
+listHolder.AutomaticSize = Enum.AutomaticSize.Y
 listHolder.Parent = pagePlayers
 
 local listLayout = Instance.new("UIListLayout")
@@ -343,202 +312,207 @@ listLayout.Padding = UDim.new(0, 6)
 listLayout.SortOrder = Enum.SortOrder.Name
 listLayout.Parent = listHolder
 
--- Refresh button
-local refreshBtn = Instance.new("TextButton")
-refreshBtn.Size = UDim2.new(1, -20, 0, 30)
-refreshBtn.Position = UDim2.new(0, 10, 1, -40)
-refreshBtn.BackgroundColor3 = COL.accent
-refreshBtn.BorderSizePixel = 0
-refreshBtn.Text = "🔄 รีเฟรชรายชื่อ"
-refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-refreshBtn.TextSize = 12
-refreshBtn.Font = Enum.Font.GothamBold
-refreshBtn.Parent = pagePlayers
-Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 6)
-
 --============================================================
 -- CREATE PLAYER ROW
 --============================================================
 local function createPlayerRow(targetPlayer)
     local row = Instance.new("Frame")
     row.Name = "Row_" .. targetPlayer.Name
-    row.Size = UDim2.new(1, 0, 0, 60)
+    row.Size = UDim2.new(1, 0, 0, 70)
     row.BackgroundColor3 = COL.bg3
     row.BackgroundTransparency = 0.3
     row.BorderSizePixel = 0
     row.Parent = listHolder
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
-    
+
     -- Avatar
     local avatar = Instance.new("ImageLabel")
-    avatar.Size = UDim2.new(0, 44, 0, 44)
-    avatar.Position = UDim2.new(0, 8, 0, 8)
+    avatar.Size = UDim2.new(0, 50, 0, 50)
+    avatar.Position = UDim2.new(0, 10, 0, 10)
     avatar.BackgroundColor3 = COL.bg
     avatar.BorderSizePixel = 0
     avatar.Image = "rbxthumb://type=AvatarHeadShot&id=" .. targetPlayer.UserId .. "&w=150&h=150"
     avatar.Parent = row
     Instance.new("UICorner", avatar).CornerRadius = UDim.new(0, 8)
-    
-    -- Name
+
+    -- DisplayName
     local nameLbl = Instance.new("TextLabel")
-    nameLbl.Size = UDim2.new(1, -180, 0, 18)
-    nameLbl.Position = UDim2.new(0, 58, 0, 6)
+    nameLbl.Size = UDim2.new(1, -200, 0, 18)
+    nameLbl.Position = UDim2.new(0, 68, 0, 8)
     nameLbl.BackgroundTransparency = 1
-    nameLbl.Text = targetPlayer.Name
+    nameLbl.Text = targetPlayer.DisplayName
     nameLbl.TextColor3 = COL.text
     nameLbl.TextSize = 13
     nameLbl.Font = Enum.Font.GothamBold
     nameLbl.TextXAlignment = Enum.TextXAlignment.Left
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
     nameLbl.Parent = row
-    
-    -- User ID
-    local idLbl = Instance.new("TextLabel")
-    idLbl.Size = UDim2.new(1, -180, 0, 14)
-    idLbl.Position = UDim2.new(0, 58, 0, 24)
-    idLbl.BackgroundTransparency = 1
-    idLbl.Text = "ID: " .. targetPlayer.UserId
-    idLbl.TextColor3 = COL.textDim
-    idLbl.TextSize = 10
-    idLbl.Font = Enum.Font.Gotham
-    idLbl.TextXAlignment = Enum.TextXAlignment.Left
-    idLbl.Parent = row
-    
+
+    -- @Username
+    local userLbl = Instance.new("TextLabel")
+    userLbl.Size = UDim2.new(1, -200, 0, 14)
+    userLbl.Position = UDim2.new(0, 68, 0, 26)
+    userLbl.BackgroundTransparency = 1
+    userLbl.Text = "@" .. targetPlayer.Name
+    userLbl.TextColor3 = COL.accent
+    userLbl.TextSize = 10
+    userLbl.Font = Enum.Font.Gotham
+    userLbl.TextXAlignment = Enum.TextXAlignment.Left
+    userLbl.Parent = row
+
     -- Distance
     local distLbl = Instance.new("TextLabel")
-    distLbl.Size = UDim2.new(1, -180, 0, 14)
-    distLbl.Position = UDim2.new(0, 58, 0, 38)
+    distLbl.Size = UDim2.new(1, -200, 0, 14)
+    distLbl.Position = UDim2.new(0, 68, 0, 42)
     distLbl.BackgroundTransparency = 1
-    distLbl.Text = "ระยะ: --"
+    distLbl.Text = "📏 ระยะ: --"
     distLbl.TextColor3 = COL.warn
     distLbl.TextSize = 10
     distLbl.Font = Enum.Font.Gotham
     distLbl.TextXAlignment = Enum.TextXAlignment.Left
     distLbl.Parent = row
-    
-    -- View 3D Button
+
+    -- Button Holder
+    local btnHolder = Instance.new("Frame")
+    btnHolder.Size = UDim2.new(0, 130, 0, 50)
+    btnHolder.Position = UDim2.new(1, -140, 0, 10)
+    btnHolder.BackgroundTransparency = 1
+    btnHolder.Parent = row
+
+    -- View 3D
     local view3DBtn = Instance.new("TextButton")
-    view3DBtn.Size = UDim2.new(0, 60, 0, 24)
-    view3DBtn.Position = UDim2.new(1, -130, 0, 8)
+    view3DBtn.Size = UDim2.new(0, 62, 0, 22)
+    view3DBtn.Position = UDim2.new(0, 0, 0, 0)
     view3DBtn.BackgroundColor3 = Color3.fromRGB(140, 80, 255)
     view3DBtn.BorderSizePixel = 0
-    view3DBtn.Text = "👁 ดู 3D"
+    view3DBtn.Text = "👁 3D"
     view3DBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     view3DBtn.TextSize = 10
     view3DBtn.Font = Enum.Font.GothamBold
-    view3DBtn.Parent = row
+    view3DBtn.Parent = btnHolder
     Instance.new("UICorner", view3DBtn).CornerRadius = UDim.new(0, 5)
     view3DBtn.MouseButton1Click:Connect(function()
-        local spawnPos = camera.CFrame.Position + camera.CFrame.LookVector * 10
-        _G.SG_showPlayerPreview(targetPlayer, spawnPos)
-        notify("👁 แสดง 3D: " .. targetPlayer.Name, Color3.fromRGB(140, 80, 255))
+        if _G.SG_showPlayerPreview then
+            local spawnPos = camera.CFrame.Position + camera.CFrame.LookVector * 10
+            _G.SG_showPlayerPreview(targetPlayer, spawnPos)
+            if notify then notify("👁 แสดง 3D: " .. targetPlayer.Name, Color3.fromRGB(140, 80, 255)) end
+        end
     end)
-    
-    -- Teleport Button
+
+    -- Teleport
     local tpBtn = Instance.new("TextButton")
-    tpBtn.Size = UDim2.new(0, 60, 0, 24)
-    tpBtn.Position = UDim2.new(1, -130, 0, 34)
+    tpBtn.Size = UDim2.new(0, 62, 0, 22)
+    tpBtn.Position = UDim2.new(0, 66, 0, 0)
     tpBtn.BackgroundColor3 = COL.accent
     tpBtn.BorderSizePixel = 0
     tpBtn.Text = "🌍 วาร์ป"
     tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     tpBtn.TextSize = 10
     tpBtn.Font = Enum.Font.GothamBold
-    tpBtn.Parent = row
+    tpBtn.Parent = btnHolder
     Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 5)
     tpBtn.MouseButton1Click:Connect(function()
-        _G.SG_TeleportToPlayer(targetPlayer)
+        if _G.SG_TeleportToPlayer then
+            _G.SG_TeleportToPlayer(targetPlayer)
+        end
     end)
-    
-    -- Copy Info Button
+
+    -- Copy Info
     local copyBtn = Instance.new("TextButton")
-    copyBtn.Size = UDim2.new(0, 26, 0, 26)
-    copyBtn.Position = UDim2.new(1, -62, 0, 8)
+    copyBtn.Size = UDim2.new(0, 62, 0, 22)
+    copyBtn.Position = UDim2.new(0, 0, 0, 26)
     copyBtn.BackgroundColor3 = COL.on
     copyBtn.BorderSizePixel = 0
-    copyBtn.Text = "📋"
+    copyBtn.Text = "📋 Copy"
     copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    copyBtn.TextSize = 12
-    copyBtn.Parent = row
+    copyBtn.TextSize = 10
+    copyBtn.Font = Enum.Font.GothamBold
+    copyBtn.Parent = btnHolder
     Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 5)
     copyBtn.MouseButton1Click:Connect(function()
-        _G.SG_CopyPlayerInfo(targetPlayer)
+        if _G.SG_CopyPlayerInfo then
+            _G.SG_CopyPlayerInfo(targetPlayer)
+        end
     end)
-    
-    -- Hide 3D Button
+
+    -- Hide 3D
     local hideBtn = Instance.new("TextButton")
-    hideBtn.Size = UDim2.new(0, 26, 0, 26)
-    hideBtn.Position = UDim2.new(1, -62, 0, 34)
+    hideBtn.Size = UDim2.new(0, 62, 0, 22)
+    hideBtn.Position = UDim2.new(0, 66, 0, 26)
     hideBtn.BackgroundColor3 = COL.red
     hideBtn.BorderSizePixel = 0
-    hideBtn.Text = "❌"
+    hideBtn.Text = "❌ ซ่อน"
     hideBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hideBtn.TextSize = 12
-    hideBtn.Parent = row
+    hideBtn.TextSize = 10
+    hideBtn.Font = Enum.Font.GothamBold
+    hideBtn.Parent = btnHolder
     Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 5)
     hideBtn.MouseButton1Click:Connect(function()
-        _G.SG_hidePlayerPreview(targetPlayer)
+        if _G.SG_hidePlayerPreview then
+            _G.SG_hidePlayerPreview(targetPlayer)
+        end
     end)
-    
-    -- Distance Update Loop
+
+    -- Distance update loop (safe)
     task.spawn(function()
         while row.Parent and targetPlayer.Parent do
             task.wait(0.5)
-            local myHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            local tHRP = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if myHRP and tHRP then
-                local dist = (myHRP.Position - tHRP.Position).Magnitude
-                distLbl.Text = "ระยะ: " .. math.floor(dist) .. " studs"
+            local ok, dist = pcall(function()
+                local myChar = player.Character
+                local tChar = targetPlayer.Character
+                if not myChar or not tChar then return nil end
+                local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+                local tHRP = tChar:FindFirstChild("HumanoidRootPart")
+                if not myHRP or not tHRP then return nil end
+                return (myHRP.Position - tHRP.Position).Magnitude
+            end)
+            if ok and dist then
+                distLbl.Text = "📏 ระยะ: " .. math.floor(dist) .. " studs"
             else
-                distLbl.Text = "ระยะ: --"
+                distLbl.Text = "📏 ระยะ: --"
             end
         end
     end)
-    
+
     return row
 end
 
 --============================================================
--- REFRESH PLAYER LIST
+-- REFRESH
 --============================================================
 local function refreshPlayerList()
     for _, c in ipairs(listHolder:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
+    local count = 0
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player then
             createPlayerRow(plr)
+            count = count + 1
         end
     end
-    listHolder.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+    headerLabel.Text = "👥 รายชื่อผู้เล่น (" .. count .. " คน)"
 end
 
-refreshBtn.MouseButton1Click:Connect(refreshPlayerList)
-
 --============================================================
--- ADD SIDEBAR BUTTON
+-- ADD SIDEBAR BUTTONS
 --============================================================
-local sidebarBtnHolder = main:FindFirstChild("Sidebar")
-    and main.Sidebar:FindFirstChild("sidebarBtnHolder")
-
-if not sidebarBtnHolder then
-    for _, v in ipairs(main:GetDescendants()) do
-        if v:IsA("Frame") and v.Name == "sidebarBtnHolder" then
-            sidebarBtnHolder = v
-            break
+if sidebarBtnHolder and makeSidebarBtn then
+    -- ลบปุ่มเก่า (ถ้ามี)
+    for _, c in ipairs(sidebarBtnHolder:GetChildren()) do
+        if c:IsA("TextButton") then
+            if c.Text:find("Players") or c.Text:find("Anti") then
+                c:Destroy()
+            end
         end
     end
-end
 
-if sidebarBtnHolder and _G.SG_showPage and _G.SG_makeSidebarBtn then
-    local bPlayer = _G.SG_makeSidebarBtn("👥  Players", 224, function()
-        -- ซ่อนทุกหน้า
+    -- ปุ่ม Players
+    local bPlayer = makeSidebarBtn("👥  Players", 224, function()
         for _, c in ipairs(contentArea:GetChildren()) do
             if c:IsA("ScrollingFrame") then c.Visible = false end
         end
-        -- แสดงหน้า Players
         pagePlayers.Visible = true
-        -- Highlight
         for _, c in ipairs(sidebarBtnHolder:GetChildren()) do
             if c:IsA("TextButton") then
                 Tween:Create(c, TweenInfo.new(0.15), {
@@ -553,87 +527,16 @@ if sidebarBtnHolder and _G.SG_showPage and _G.SG_makeSidebarBtn then
             BackgroundTransparency = 0,
             TextColor3 = Color3.fromRGB(255, 255, 255),
         }):Play()
-        
         refreshPlayerList()
     end)
-    
-    print("[SG] เพิ่มปุ่ม Players เข้า Sidebar แล้ว")
+
+    print("[SG v8.0] เพิ่มปุ่ม Players แล้ว")
 end
 
---============================================================
--- ADD EXTRA BUTTONS IN UTILITY PAGE
---============================================================
-local pageUtility = _G.SG_pageUtility
-if pageUtility then
-    -- หา y ล่าสุด
-    local maxY = 0
-    for _, c in ipairs(pageUtility:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("TextButton") then
-            local y = c.Position.Y.Offset
-            if y + c.Size.Y.Offset > maxY then
-                maxY = y + c.Size.Y.Offset
-            end
-        end
-    end
-    
-    -- เพิ่มปุ่ม Server Hop
-    local section = Instance.new("Frame")
-    section.Size = UDim2.new(1, -20, 0, 24)
-    section.Position = UDim2.new(0, 10, 0, maxY + 10)
-    section.BackgroundColor3 = COL.bg3
-    section.BackgroundTransparency = 0.4
-    section.BorderSizePixel = 0
-    section.Parent = pageUtility
-    Instance.new("UICorner", section).CornerRadius = UDim.new(0, 6)
-    
-    local sectionLabel = Instance.new("TextLabel")
-    sectionLabel.Size = UDim2.new(1, -16, 1, 0)
-    sectionLabel.Position = UDim2.new(0, 8, 0, 0)
-    sectionLabel.BackgroundTransparency = 1
-    sectionLabel.Text = "🌐 SERVER"
-    sectionLabel.TextColor3 = COL.accent
-    sectionLabel.TextSize = 12
-    sectionLabel.Font = Enum.Font.GothamBold
-    sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
-    sectionLabel.Parent = section
-    
-    local hopBtn = Instance.new("TextButton")
-    hopBtn.Size = UDim2.new(1, -20, 0, 30)
-    hopBtn.Position = UDim2.new(0, 10, 0, maxY + 40)
-    hopBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    hopBtn.BorderSizePixel = 0
-    hopBtn.Text = "🌐 Server Hop (ย้ายเซิร์ฟเวอร์)"
-    hopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hopBtn.TextSize = 12
-    hopBtn.Font = Enum.Font.GothamBold
-    hopBtn.Parent = pageUtility
-    Instance.new("UICorner", hopBtn).CornerRadius = UDim.new(0, 6)
-    hopBtn.MouseButton1Click:Connect(_G.SG_ServerHop)
-    
-    -- เพิ่มปุ่ม Hide All Previews
-    local hideAllBtn = Instance.new("TextButton")
-    hideAllBtn.Size = UDim2.new(1, -20, 0, 30)
-    hideAllBtn.Position = UDim2.new(0, 10, 0, maxY + 76)
-    hideAllBtn.BackgroundColor3 = COL.red
-    hideAllBtn.BorderSizePixel = 0
-    hideAllBtn.Text = "🗑 ลบ 3D Preview ทั้งหมด"
-    hideAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hideAllBtn.TextSize = 12
-    hideAllBtn.Font = Enum.Font.GothamBold
-    hideAllBtn.Parent = pageUtility
-    Instance.new("UICorner", hideAllBtn).CornerRadius = UDim.new(0, 6)
-    hideAllBtn.MouseButton1Click:Connect(function()
-        _G.SG_hideAllPreviews()
-        notify("🗑 ลบ preview ทั้งหมดแล้ว", COL.red)
-    end)
-    
-    pageUtility.CanvasSize = UDim2.new(0, 0, 0, maxY + 120)
-end
-
--- Auto refresh player list
+-- Auto refresh
 task.spawn(function()
     while _G.SG5_P1 do
-        task.wait(5)
+        task.wait(3)
         if pagePlayers.Visible then
             refreshPlayerList()
         end
@@ -648,10 +551,75 @@ Players.PlayerRemoving:Connect(function(plr)
     if pagePlayers.Visible then refreshPlayerList() end
 end)
 
-print("[SG v7.0] P4 โหลดเสร็จ — Player List + 3D Preview พร้อมใช้งาน")
-print("════════════════════════════════════════════")
-print("✅ SIGMAGOON HUB v7.0 โหลดครบทั้ง 4 ส่วน")
-print("📋 8 หน้า: หน้าหลัก / Combat / ดวงตาเทพ / มองบอท / รถถัง / Combat Extras / Utility / Players")
-print("🎯 34 ฟีเจอร์: Movement + Combat + ESP + Utility + Server Hop")
-print("👁 3D Preview: แสดงโมเดลผู้เล่น 3D หมุนได้")
-print("════════════════════════════════════════════")
+--============================================================
+-- เพิ่มปุ่ม Server Hop ใน Utility
+--============================================================
+local pageUtility = _G.SG_pageUtility
+if pageUtility then
+    local maxY = 0
+    for _, c in ipairs(pageUtility:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then
+            local y = c.Position.Y.Offset + c.Size.Y.Offset
+            if y > maxY then maxY = y end
+        end
+    end
+
+    -- Section
+    local section = Instance.new("Frame")
+    section.Size = UDim2.new(1, -20, 0, 24)
+    section.Position = UDim2.new(0, 10, 0, maxY + 10)
+    section.BackgroundColor3 = COL.bg3
+    section.BackgroundTransparency = 0.4
+    section.BorderSizePixel = 0
+    section.Parent = pageUtility
+    Instance.new("UICorner", section).CornerRadius = UDim.new(0, 6)
+
+    local sectionLabel = Instance.new("TextLabel")
+    sectionLabel.Size = UDim2.new(1, -16, 1, 0)
+    sectionLabel.Position = UDim2.new(0, 8, 0, 0)
+    sectionLabel.BackgroundTransparency = 1
+    sectionLabel.Text = "🌐 SERVER"
+    sectionLabel.TextColor3 = COL.accent
+    sectionLabel.TextSize = 12
+    sectionLabel.Font = Enum.Font.GothamBold
+    sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+    sectionLabel.Parent = section
+
+    -- Server Hop Button
+    local hopBtn = Instance.new("TextButton")
+    hopBtn.Size = UDim2.new(1, -20, 0, 30)
+    hopBtn.Position = UDim2.new(0, 10, 0, maxY + 40)
+    hopBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    hopBtn.BorderSizePixel = 0
+    hopBtn.Text = "🌐 Server Hop"
+    hopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hopBtn.TextSize = 12
+    hopBtn.Font = Enum.Font.GothamBold
+    hopBtn.Parent = pageUtility
+    Instance.new("UICorner", hopBtn).CornerRadius = UDim.new(0, 6)
+    hopBtn.MouseButton1Click:Connect(_G.SG_ServerHop)
+
+    -- Hide All 3D
+    local hideAllBtn = Instance.new("TextButton")
+    hideAllBtn.Size = UDim2.new(1, -20, 0, 30)
+    hideAllBtn.Position = UDim2.new(0, 10, 0, maxY + 76)
+    hideAllBtn.BackgroundColor3 = COL.red
+    hideAllBtn.BorderSizePixel = 0
+    hideAllBtn.Text = "🗑 ลบ 3D Preview ทั้งหมด"
+    hideAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hideAllBtn.TextSize = 12
+    hideAllBtn.Font = Enum.Font.GothamBold
+    hideAllBtn.Parent = pageUtility
+    Instance.new("UICorner", hideAllBtn).CornerRadius = UDim.new(0, 6)
+    hideAllBtn.MouseButton1Click:Connect(function()
+        _G.SG_hideAllPreviews()
+        if notify then notify("🗑 ลบ preview ทั้งหมดแล้ว", COL.red) end
+    end)
+
+    pageUtility.CanvasSize = UDim2.new(0, 0, 0, maxY + 120)
+end
+
+-- Refresh function external
+_G.SG_refreshPlayerList = refreshPlayerList
+
+print("[SG v8.0] P4 โหลดเสร็จ — Player List + 3D Preview + Server Hop")
