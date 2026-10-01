@@ -1,5 +1,5 @@
 --============================================================
--- SIGMAGOON HUB v7.0 — P2 (UI + ESP)
+-- SIGMAGOON HUB v8.0 — P2 (UI + ESP)
 --============================================================
 if not _G.SG5_P1 then
     warn("[SG] ต้องรัน P1 ก่อน!")
@@ -32,7 +32,7 @@ local revertNC = _G.SG_revertNC
 local setInvisible = _G.SG_setInvisible
 local setGodmode = _G.SG_setGodmode
 
-print("[SG v7.0] P2 เริ่มโหลด")
+print("[SG v8.0] P2 เริ่มโหลด")
 
 --============================================================
 -- GRAPHICS
@@ -70,6 +70,8 @@ local function revertGraphics()
         Lighting.Brightness = origGraphics.Brightness
     end)
 end
+_G.SG_applyLowGraphics = applyLowGraphics
+_G.SG_revertGraphics = revertGraphics
 
 --============================================================
 -- ESP SYSTEM
@@ -264,6 +266,11 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+_G.SG_scanPlayerESP = scanPlayerESP
+_G.SG_scanBotESP = scanBotESP
+_G.SG_scanVehicleESP = scanVehicleESP
+_G.SG_updateESPTexts = updateESPTexts
+
 --============================================================
 -- UI COLORS
 --============================================================
@@ -292,7 +299,7 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = player:WaitForChild("PlayerGui")
 
-print("[SG v7.0] Gui สร้างแล้ว")
+print("[SG v8.0] Gui สร้างแล้ว")
 
 local mainW, mainH = 660, 440
 local main = Instance.new("Frame")
@@ -328,7 +335,7 @@ local titleText = Instance.new("TextLabel")
 titleText.Size = UDim2.new(1, -140, 1, 0)
 titleText.Position = UDim2.new(0, 16, 0, 0)
 titleText.BackgroundTransparency = 1
-titleText.Text = "SIGMAGOON HUB  |  v7.0"
+titleText.Text = "SIGMAGOON HUB  |  v8.0"
 titleText.TextColor3 = COL.text
 titleText.TextSize = 15
 titleText.Font = Enum.Font.GothamBold
@@ -674,7 +681,7 @@ local function buildContent(page)
     return ctx
 end
 
--- PAGE 1: หน้าหลัก
+-- PAGE 1: Movement (รวม TP Walk)
 local ctxMain = buildContent(pageMain)
 ctxMain.section("⚙ การเคลื่อนไหว")
 ctxMain.toggle("บิน", function() return CONFIG.FlyEnabled end,
@@ -689,6 +696,17 @@ ctxMain.toggle("กระโดดไม่จำกัด", function() return C
     function(v) CONFIG.JumpEnabled = v end)
 ctxMain.slider("ความสูงกระโดด", 50, 500, function() return CONFIG.JumpPower end,
     function(v) CONFIG.JumpPower = v end)
+
+ctxMain.section("🚀 TP WALK")
+ctxMain.toggle("เปิด TP WALK", function() return CONFIG.TPWalkEnabled end,
+    function(v) CONFIG.TPWalkEnabled = v end)
+ctxMain.slider("ความเร็ว TP", 0, 1000, function() return CONFIG.TPWalkSpeed end,
+    function(v) CONFIG.TPWalkSpeed = v end)
+ctxMain.toggle("กันตกวอยซ์", function() return CONFIG.TPWalkAntiVoid end,
+    function(v) CONFIG.TPWalkAntiVoid = v end)
+ctxMain.toggle("เดินบนน้ำ", function() return CONFIG.TPWalkWaterWalk end,
+    function(v) CONFIG.TPWalkWaterWalk = v end)
+
 ctxMain.section("🦘 ซ่อน / อมตะ")
 ctxMain.toggle("เดินทะลุหญ้า", function() return CONFIG.NoCollideEnabled end,
     function(v) CONFIG.NoCollideEnabled = v; if v then applyNC() else revertNC() end end)
@@ -696,12 +714,14 @@ ctxMain.toggle("หายตัว", function() return CONFIG.InvisibleEnabled e
     function(v) CONFIG.InvisibleEnabled = v; setInvisible(v) end)
 ctxMain.toggle("อมตะ", function() return CONFIG.GodmodeEnabled end,
     function(v) CONFIG.GodmodeEnabled = v; setGodmode(v) end)
+
 ctxMain.section("📍 จุดวาร์ป")
 ctxMain.button("💾 ตั้งจุดสปอร์ตปัจจุบัน", COL.on, _G.SG_saveCurrentSpawn)
 ctxMain.button("🚀 วาร์ปไปจุดสปอร์ต", COL.accent, _G.SG_warpToSpawn)
 ctxMain.button("💀 บันทึกจุดตาย", Color3.fromRGB(150,80,80), _G.SG_saveDeathPoint)
 ctxMain.button("⚰ วาร์ปไปจุดตาย", Color3.fromRGB(200,80,80), _G.SG_warpToDeath)
 ctxMain.button("🗑 เคลียร์", COL.red, _G.SG_clearSpawn)
+
 ctxMain.section("🌐 Teleport Points")
 local tpListLabel = ctxMain.label("ยังไม่มีจุด", COL.textDim)
 ctxMain.button("➕ เพิ่มจุด", COL.accent, function()
@@ -715,6 +735,7 @@ end)
 for i = 1, 5 do
     ctxMain.button("➡ วาร์ปไปจุดที่ " .. i, Color3.fromRGB(50,80,130), function() _G.SG_warpToTP(i) end)
 end
+
 ctxMain.section("📊 ข้อมูล")
 local coordsLabel = ctxMain.label("X: 0  Y: 0  Z: 0", COL.warn)
 ctxMain.button("🔄 รายงานพิกัด", COL.accent, function()
@@ -722,14 +743,17 @@ ctxMain.button("🔄 รายงานพิกัด", COL.accent, function()
 end)
 ctxMain.finalize()
 _G.SG_coordsLabel = coordsLabel
+_G.SG_ctxMain = ctxMain
+_G.SG_pageMain = pageMain
 
--- PAGE 2: Combat (Laser + Aimbot + TP Walk)
+-- PAGE 2: Combat (Laser + Aimbot เท่านั้น — ไม่มี TP Walk)
 local ctxM2 = buildContent(pageMain2)
 ctxM2.section("🔦 เลเซอร์")
 ctxM2.toggle("เปิดเลเซอร์", function() return CONFIG.LaserEnabled end,
     function(v) CONFIG.LaserEnabled = v end)
 ctxM2.slider("ระยะเลเซอร์", 10, 1000, function() return CONFIG.MaxDistance end,
     function(v) CONFIG.MaxDistance = v end)
+
 ctxM2.section("🎯 AIMBOT (Camera)")
 ctxM2.toggle("เปิด AIMBOT", function() return CONFIG.AimbotEnabled end,
     function(v) CONFIG.AimbotEnabled = v; fovCircle.Visible = v end)
@@ -741,20 +765,11 @@ ctxM2.toggle("เช็คกำแพง", function() return CONFIG.AimbotWallC
     function(v) CONFIG.AimbotWallCheck = v end)
 ctxM2.toggle("ไม่ล็อกทีม", function() return CONFIG.AimbotTeamCheck end,
     function(v) CONFIG.AimbotTeamCheck = v end)
-ctxM2.section("🚀 TP WALK")
-ctxM2.toggle("เปิด TP WALK", function() return CONFIG.TPWalkEnabled end,
-    function(v) CONFIG.TPWalkEnabled = v end)
-ctxM2.slider("ความเร็ว TP", 0, 1000, function() return CONFIG.TPWalkSpeed end,
-    function(v) CONFIG.TPWalkSpeed = v end)
-ctxM2.toggle("กันตกวอยซ์", function() return CONFIG.TPWalkAntiVoid end,
-    function(v) CONFIG.TPWalkAntiVoid = v end)
-ctxM2.toggle("เดินบนน้ำ", function() return CONFIG.TPWalkWaterWalk end,
-    function(v) CONFIG.TPWalkWaterWalk = v end)
 ctxM2.finalize()
 
 -- PAGE 3: ดวงตาเทพ
 local ctxEyes = buildContent(pageEyes)
-ctxEyes.section("👁 ดวงตาเทพ")
+ctxEyes.section("👁 ดวงตาเทพ (Player ESP)")
 ctxEyes.toggle("เปิดดวงตาเทพ", function() return CONFIG.PlayerESPEnabled end,
     function(v) CONFIG.PlayerESPEnabled = v end)
 ctxEyes.toggle("แสดงชื่อ", function() return CONFIG.PlayerESPShowName end,
@@ -767,7 +782,7 @@ ctxEyes.finalize()
 
 -- PAGE 4: มองบอท
 local ctxBots = buildContent(pageBots)
-ctxBots.section("🤖 มองบอท")
+ctxBots.section("🤖 มองบอท (NPC ESP)")
 ctxBots.toggle("เปิดมองบอท", function() return CONFIG.BotESPEnabled end,
     function(v) CONFIG.BotESPEnabled = v end)
 ctxBots.toggle("แสดงชื่อบอท", function() return CONFIG.BotESPShowName end,
@@ -790,15 +805,15 @@ ctxVeh.finalize()
 -- PAGE 6: Combat Extras (P3 จะเติม)
 local ctxCombat = buildContent(pageCombat)
 ctxCombat.section("⚡ COMBAT EXTRAS")
-ctxCombat.label("(โหลด P3 เพื่อเปิดฟีเจอร์นี้)", COL.textDim)
+ctxCombat.label("(โหลด P3 เพื่อเปิดฟีเจอร์)", COL.textDim)
 ctxCombat.finalize()
 _G.SG_pageCombat = pageCombat
 _G.SG_ctxCombat = ctxCombat
 
--- PAGE 7: Utility (P3 จะเติม)
+-- PAGE 7: Utility (P3 + P4 จะเติม)
 local ctxUtil = buildContent(pageUtility)
 ctxUtil.section("🛠 UTILITY")
-ctxUtil.label("(โหลด P3 เพื่อเปิดฟีเจอร์นี้)", COL.textDim)
+ctxUtil.label("(โหลด P3/P4 เพื่อเปิดฟีเจอร์)", COL.textDim)
 ctxUtil.finalize()
 _G.SG_pageUtility = pageUtility
 _G.SG_ctxUtility = ctxUtil
@@ -846,6 +861,7 @@ local function updateFovCircleSize()
     fovCircle.Size = UDim2.new(0, radiusPx*2, 0, radiusPx*2)
 end
 updateFovCircleSize()
+_G.updateFovCircleSize = updateFovCircleSize
 
 -- Status Bar
 local statusFrame = Instance.new("Frame")
@@ -894,7 +910,7 @@ _G.SG_statusFunc = function(text, color)
     end
 end
 
-print("[SG v7.0] P2 UI เสร็จแล้ว")
+print("[SG v8.0] P2 UI เสร็จแล้ว")
 
 -- Sidebar Buttons
 local function makeSidebarBtn(text, yPos, callback)
@@ -930,6 +946,13 @@ end
 local pages = { pageMain, pageMain2, pageEyes, pageBots, pageVehicle, pageCombat, pageUtility, pageSettings }
 local btns = {}
 local function showPage(idx)
+    -- ★ ซ่อนทุก ScrollingFrame (รวม PagePlayers, PageAnti)
+    for _, c in ipairs(contentArea:GetChildren()) do
+        if c:IsA("ScrollingFrame") then
+            c.Visible = false
+        end
+    end
+    -- แสดงหน้า
     for i, p in ipairs(pages) do p.Visible = (i == idx) end
     for i, b in ipairs(btns) do setActiveBtn(b, i == idx) end
 end
@@ -938,14 +961,14 @@ _G.SG_pages = pages
 _G.SG_makeSidebarBtn = makeSidebarBtn
 _G.SG_setActiveBtn = setActiveBtn
 
-local bMain = makeSidebarBtn("🏠  หน้าหลัก", 0, function() showPage(1) end)
-local bMain2 = makeSidebarBtn("⚡  Combat", 28, function() showPage(2) end)
-local bEyes = makeSidebarBtn("👁  ดวงตาเทพ", 56, function() showPage(3) end)
-local bBots = makeSidebarBtn("🤖  มองบอท", 84, function() showPage(4) end)
-local bVeh = makeSidebarBtn("🚗  ESP รถถัง", 112, function() showPage(5) end)
-local bCombat = makeSidebarBtn("🎯  Combat Extras", 140, function() showPage(6) end)
+local bMain = makeSidebarBtn("🏠  Movement", 0, function() showPage(1) end)
+local bMain2 = makeSidebarBtn("🎯  Combat", 28, function() showPage(2) end)
+local bEyes = makeSidebarBtn("👁  ESP Players", 56, function() showPage(3) end)
+local bBots = makeSidebarBtn("🤖  ESP Bots", 84, function() showPage(4) end)
+local bVeh = makeSidebarBtn("🚗  ESP Vehicle", 112, function() showPage(5) end)
+local bCombat = makeSidebarBtn("⚡  Combat Extras", 140, function() showPage(6) end)
 local bUtil = makeSidebarBtn("🛠  Utility", 168, function() showPage(7) end)
-local bSet = makeSidebarBtn("⚙  ตั้งค่า", 196, function() showPage(8) end)
+local bSet = makeSidebarBtn("⚙  Settings", 196, function() showPage(8) end)
 btns = { bMain, bMain2, bEyes, bBots, bVeh, bCombat, bUtil, bSet }
 _G.SG_btns = btns
 showPage(1)
@@ -1036,8 +1059,14 @@ local function hookTool(tool)
             if gunLabel then gunLabel.Text = "🔫 ไม่ได้ถืออาวุธ" end
         end
     end))
-    local hum = getHum()
-    if hum and hum.EquippedTool == tool then attachToolLaser(tool) end
+    -- ★ Safe: ไม่ใช้ hum.EquippedTool (deprecated)
+    local char = player.Character
+    if char then
+        local equippedTool = char:FindFirstChildWhichIsA("Tool")
+        if equippedTool == tool then
+            attachToolLaser(tool)
+        end
+    end
 end
 
 local function attachVehicleLaser(seat)
@@ -1141,4 +1170,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("[SG v7.0] P2 โหลดเสร็จ")
+print("[SG v8.0] P2 โหลดเสร็จ")
