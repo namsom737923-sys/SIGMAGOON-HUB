@@ -1,5 +1,5 @@
 --============================================================
--- SIGMAGOON HUB v7.0 — P1 (Core Logic)
+-- SIGMAGOON HUB v8.0 — P1 (Core Logic)
 --============================================================
 if _G.SG5_P1 then
     pcall(function()
@@ -25,7 +25,7 @@ local Lighting   = game:GetService("Lighting")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-print("[SG v7.0] P1 เริ่มโหลด")
+print("[SG v8.0] P1 เริ่มโหลด")
 
 local CONFIG = {
     FlyEnabled=false, FlySpeed=50,
@@ -256,7 +256,13 @@ _G.SG_setGodmode = setGodmode
 -- TP SYSTEM
 local savedSpawn, savedDeath = nil, nil
 local teleportPoints = {}
-local function saveCurrentSpawn() local h=getHRP(); if h then savedSpawn=h.CFrame end end
+local function saveCurrentSpawn()
+    local h=getHRP()
+    if h then
+        savedSpawn=h.CFrame
+        _G.SG_savedSpawnCFrame = h.CFrame
+    end
+end
 local function warpToSpawn() if savedSpawn then local h=getHRP(); if h then h.CFrame=savedSpawn end end end
 local function saveDeathPoint() local h=getHRP(); if h then savedDeath=h.CFrame end end
 local function warpToDeath() if savedDeath then local h=getHRP(); if h then h.CFrame=savedDeath end end end
@@ -661,4 +667,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-print("[SG v7.0] P1 โหลดเสร็จ")
+print("[SG v8.0] P1 โหลดเสร็จ")
