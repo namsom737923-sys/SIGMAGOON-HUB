@@ -1,5 +1,5 @@
 --============================================================
--- SIGMAGOON HUB v7.0 — P3 (Combat Extras + Trigger Bot + 15 Features)
+-- SIGMAGOON HUB v8.0 — P3 (Combat Extras + Utilities)
 --============================================================
 if not _G.SG5_P2 then
     warn("[SG] ต้องรัน P2 ก่อน!")
@@ -14,6 +14,7 @@ local Tween      = game:GetService("TweenService")
 local CoreGui    = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
+local Lighting   = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -26,8 +27,10 @@ local isSameTeam = _G.SG_isSameTeam
 local COL = _G.SG_COL
 local pageCombat = _G.SG_pageCombat
 local pageUtility = _G.SG_pageUtility
+local applyLowGraphics = _G.SG_applyLowGraphics
+local revertGraphics = _G.SG_revertGraphics
 
-print("[SG v7.0] P3 เริ่มโหลด")
+print("[SG v8.0] P3 เริ่มโหลด")
 
 --============================================================
 -- CONFIG เพิ่มเติม
@@ -43,7 +46,6 @@ CONFIG.SilentAimTeamCheck = true
 
 CONFIG.AimPredictionEnabled = false
 CONFIG.AimPredictionAmount = 0.15
-
 CONFIG.TargetPriority = "closest"
 
 CONFIG.AntiAFKEnabled = false
@@ -54,6 +56,16 @@ CONFIG.RGBUIEnabled = false
 CONFIG.FreeCamEnabled = false
 CONFIG.FootstepESPEnabled = false
 CONFIG.HitMarkerEnabled = false
+
+CONFIG.AntiVoidEnabled = false
+CONFIG.AntiVoidY = -50
+CONFIG.AutoRespawnEnabled = false
+CONFIG.AutoRespawnDelay = 3
+CONFIG.HitboxEnabled = false
+CONFIG.HitboxSize = 5
+CONFIG.WallWalkEnabled = false
+CONFIG.SafeModeEnabled = false
+CONFIG.SafeModeMaxSpeed = 100
 
 --============================================================
 -- NOTIFICATION SYSTEM
@@ -72,12 +84,12 @@ _G.SG_notify = function(text, color)
     notif.BorderSizePixel = 0
     notif.Parent = notificationGui
     Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 8)
-    
+
     local stroke = Instance.new("UIStroke")
     stroke.Color = color or Color3.fromRGB(0, 255, 100)
     stroke.Thickness = 1.5
     stroke.Parent = notif
-    
+
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -20, 1, 0)
     label.Position = UDim2.new(0, 10, 0, 0)
@@ -88,12 +100,13 @@ _G.SG_notify = function(text, color)
     label.Font = Enum.Font.GothamBold
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = notif
-    
+
     Tween:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
         Position = UDim2.new(0.5, -140, 1, -60)
     }):Play()
-    
+
     task.delay(3, function()
+        if not notif or not notif.Parent then return end
         Tween:Create(notif, TweenInfo.new(0.3), {
             Position = UDim2.new(0.5, -140, 1, 20),
         }):Play()
@@ -102,6 +115,8 @@ _G.SG_notify = function(text, color)
         end)
     end)
 end
+
+local notify = _G.SG_notify
 
 --============================================================
 -- TRIGGER BOT
@@ -112,27 +127,25 @@ RunService.RenderStepped:Connect(function()
     if not CONFIG.TriggerBotEnabled then return end
     local now = tick()
     if now - triggerLastFire < CONFIG.TriggerBotDelay then return end
-    
+
     local target = mouse.Target
-    if target then
-        local model = target:FindFirstAncestorOfClass("Model")
-        if model then
-            local hum = model:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then
-                local plr = Players:GetPlayerFromCharacter(model)
-                if plr and plr ~= player then
-                    if not isSameTeam(plr) then
-                        if math.random(1, 100) <= CONFIG.TriggerBotHitChance then
-                            local tool = player.Character and player.Character:FindFirstChildWhichIsA("Tool")
-                            if tool then
-                                pcall(function() tool:Activate() end)
-                                triggerLastFire = now
-                            end
-                        end
-                    end
-                end
-            end
-        end
+    if not target then return end
+    local model = target:FindFirstAncestorOfClass("Model")
+    if not model then return end
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    local plr = Players:GetPlayerFromCharacter(model)
+    if not plr or plr == player then return end
+    if isSameTeam(plr) then return end
+    if math.random(1, 100) > CONFIG.TriggerBotHitChance then return end
+
+    local char = player.Character
+    if not char then return end
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if tool then
+        pcall(function() tool:Activate() end)
+        triggerLastFire = now
+        if _G.SG_showHitMarker then _G.SG_showHitMarker() end
     end
 end)
 
@@ -147,7 +160,7 @@ local function findSilentTarget()
     local camPos = camera.CFrame.Position
     local camLook = camera.CFrame.LookVector
     local best, bestPos, bestScore = nil, nil, math.huge
-    
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player and not (CONFIG.SilentAimTeamCheck and isSameTeam(plr)) then
             local char = plr.Character
@@ -203,7 +216,7 @@ if visualBullet then
                 if args[4] and args[4]:IsA("Attachment") then
                     local origin = args[4].WorldPosition
                     local dir = (silentTargetPos - origin).Unit
-                    
+
                     if args[3] and type(args[3]) == "table" then
                         local newArgs3 = {}
                         for k, v in pairs(args[3]) do newArgs3[k] = v end
@@ -250,7 +263,7 @@ _G.SG_findPriorityTarget = function()
     local camLook = camera.CFrame.LookVector
     local vp = camera.ViewportSize
     local best, bestScore, bestPart = nil, math.huge, nil
-    
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player and not isSameTeam(plr) then
             local char = plr.Character
@@ -362,16 +375,113 @@ RunService.Heartbeat:Connect(function()
 end)
 
 --============================================================
+-- ANTI-VOID
+--============================================================
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.AntiVoidEnabled then return end
+    local hrp = getHRP()
+    if not hrp then return end
+    if hrp.Position.Y < CONFIG.AntiVoidY then
+        if _G.SG_savedSpawnCFrame then
+            hrp.CFrame = _G.SG_savedSpawnCFrame
+        else
+            hrp.CFrame = CFrame.new(0, 50, 0)
+        end
+        if notify then notify("⚠ Anti-Void: วาร์ปกลับ!", COL.warn) end
+    end
+end)
+
+--============================================================
+-- AUTO RESPAWN
+--============================================================
+local lastDeathTime = 0
+task.spawn(function()
+    while _G.SG5_P1 do
+        task.wait(0.5)
+        if CONFIG.AutoRespawnEnabled then
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health <= 0 then
+                if tick() - lastDeathTime > CONFIG.AutoRespawnDelay then
+                    lastDeathTime = tick()
+                    pcall(function() player:LoadCharacter() end)
+                    if notify then notify("💀 Auto-Respawn แล้ว", COL.accent) end
+                end
+            end
+        end
+    end
+end)
+
+--============================================================
+-- HITBOX EXPANDER
+--============================================================
+local hitboxBackup = {}
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.HitboxEnabled then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            local char = plr.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if not hitboxBackup[hrp] then
+                        hitboxBackup[hrp] = hrp.Size
+                    end
+                    hrp.Size = Vector3.new(CONFIG.HitboxSize, CONFIG.HitboxSize, CONFIG.HitboxSize)
+                    hrp.Transparency = 0.7
+                    hrp.CanCollide = false
+                    hrp.Material = Enum.Material.Neon
+                    hrp.Color = Color3.fromRGB(255, 0, 0)
+                end
+            end
+        end
+    end
+end)
+
+_G.SG_restoreHitbox = function()
+    for hrp, size in pairs(hitboxBackup) do
+        if hrp and hrp.Parent then
+            hrp.Size = size
+            hrp.Transparency = 1
+            hrp.CanCollide = true
+        end
+    end
+    table.clear(hitboxBackup)
+end
+
+--============================================================
+-- WALL WALK
+--============================================================
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.WallWalkEnabled then return end
+    local hum = getHum()
+    if not hum then return end
+    pcall(function() hum.PlatformStand = true end)
+end)
+
+--============================================================
+-- SAFE MODE
+--============================================================
+RunService.Heartbeat:Connect(function()
+    if not CONFIG.SafeModeEnabled then return end
+    local hum = getHum()
+    if hum then
+        if hum.WalkSpeed > CONFIG.SafeModeMaxSpeed then
+            hum.WalkSpeed = CONFIG.SafeModeMaxSpeed
+        end
+        if hum.JumpPower > 200 then
+            hum.JumpPower = 200
+        end
+    end
+end)
+
+--============================================================
 -- RGB UI
 --============================================================
 local rgbHue = 0
 RunService.RenderStepped:Connect(function(dt)
     if not CONFIG.RGBUIEnabled then return end
     rgbHue = (rgbHue + dt * 0.3) % 1
-    local color = Color3.fromHSV(rgbHue, 0.8, 1)
-    if _G.SG_guiColorUpdate then
-        _G.SG_guiColorUpdate(color)
-    end
 end)
 
 --============================================================
@@ -503,7 +613,7 @@ _G.SG_saveConfig = function()
     local json = HttpService:JSONEncode(data)
     if writefile then
         pcall(function() writefile("sigmagoon_config.json", json) end)
-        _G.SG_notify("💾 บันทึก config แล้ว", Color3.fromRGB(0, 255, 100))
+        if notify then notify("💾 บันทึก config แล้ว", Color3.fromRGB(0, 255, 100)) end
         return true
     end
     return false
@@ -517,7 +627,7 @@ _G.SG_loadConfig = function()
     end)
     if ok and data then
         for k, v in pairs(data) do CONFIG[k] = v end
-        _G.SG_notify("📂 โหลด config แล้ว", Color3.fromRGB(0, 200, 255))
+        if notify then notify("📂 โหลด config แล้ว", Color3.fromRGB(0, 200, 255)) end
         return true
     end
     return false
@@ -540,32 +650,22 @@ local function createCrosshair()
     crosshairGui.ResetOnSpawn = false
     crosshairGui.IgnoreGuiInset = true
     crosshairGui.Parent = CoreGui
-    
-    if CONFIG.CrosshairStyle == "dot" then
-        local dot = Instance.new("Frame")
-        dot.Size = UDim2.new(0, 4, 0, 4)
-        dot.Position = UDim2.new(0.5, -2, 0.5, -2)
-        dot.BackgroundColor3 = CONFIG.CrosshairColor
-        dot.BorderSizePixel = 0
-        dot.Parent = crosshairGui
-        Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-    else
-        local size = CONFIG.CrosshairSize
-        for i = 1, 4 do
-            local line = Instance.new("Frame")
-            line.Size = UDim2.new(0, 2, 0, size)
-            line.BackgroundColor3 = CONFIG.CrosshairColor
-            line.BorderSizePixel = 0
-            line.AnchorPoint = Vector2.new(0.5, 0.5)
-            line.Position = UDim2.new(0.5, 0, 0.5, 0)
-            line.Rotation = (i-1) * 90
-            line.Parent = crosshairGui
-            local offset = size / 2 + 2
-            if i == 1 then line.Position = UDim2.new(0.5, 0, 0.5, -offset)
-            elseif i == 2 then line.Position = UDim2.new(0.5, offset, 0.5, 0)
-            elseif i == 3 then line.Position = UDim2.new(0.5, 0, 0.5, offset)
-            elseif i == 4 then line.Position = UDim2.new(0.5, -offset, 0.5, 0) end
-        end
+
+    local size = CONFIG.CrosshairSize
+    for i = 1, 4 do
+        local line = Instance.new("Frame")
+        line.Size = UDim2.new(0, 2, 0, size)
+        line.BackgroundColor3 = CONFIG.CrosshairColor
+        line.BorderSizePixel = 0
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.Position = UDim2.new(0.5, 0, 0.5, 0)
+        line.Rotation = (i-1) * 90
+        line.Parent = crosshairGui
+        local offset = size / 2 + 2
+        if i == 1 then line.Position = UDim2.new(0.5, 0, 0.5, -offset)
+        elseif i == 2 then line.Position = UDim2.new(0.5, offset, 0.5, 0)
+        elseif i == 3 then line.Position = UDim2.new(0.5, 0, 0.5, offset)
+        elseif i == 4 then line.Position = UDim2.new(0.5, -offset, 0.5, 0) end
     end
 end
 
@@ -655,30 +755,15 @@ task.spawn(function()
 end)
 
 --============================================================
--- SOUND SPAM
+-- UI — เพิ่มในหน้า Combat (Combat Extras)
 --============================================================
-_G.SG_SoundSpam = function(soundId, duration)
-    duration = duration or 3
-    local sound = Instance.new("Sound")
-    sound.SoundId = "rbxassetid://" .. soundId
-    sound.Volume = 3
-    sound.Looped = true
-    sound.Parent = game:GetService("SoundService")
-    sound:Play()
-    task.delay(duration, function()
-        if sound and sound.Parent then sound:Destroy() end
-    end)
-end
-
---============================================================
--- UI — เพิ่มเข้า pageCombat
---============================================================
-if pageCombat and _G.SG_ctxCombat then
-    -- ลบ label เก่า
+if pageCombat then
     for _, c in ipairs(pageCombat:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then
+            c:Destroy()
+        end
     end
-    
+
     local ctx = { y = 10 }
     local function section(text)
         local h = Instance.new("Frame")
@@ -701,7 +786,7 @@ if pageCombat and _G.SG_ctxCombat then
         l.Parent = h
         ctx.y = ctx.y + 30
     end
-    
+
     local function toggle(label, get, set)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, -20, 0, 34)
@@ -724,7 +809,7 @@ if pageCombat and _G.SG_ctxCombat then
         local sw = Instance.new("TextButton")
         sw.Size = UDim2.new(0, 40, 0, 20)
         sw.Position = UDim2.new(1, -48, 0.5, -10)
-        sw.BackgroundColor3 = COL.off
+        sw.BackgroundColor3 = get() and COL.on or COL.off
         sw.BorderSizePixel = 0
         sw.Text = ""
         sw.AutoButtonColor = false
@@ -732,7 +817,7 @@ if pageCombat and _G.SG_ctxCombat then
         Instance.new("UICorner", sw).CornerRadius = UDim.new(1, 0)
         local knob = Instance.new("Frame")
         knob.Size = UDim2.new(0, 16, 0, 16)
-        knob.Position = UDim2.new(0, 2, 0.5, -8)
+        knob.Position = get() and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
         knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         knob.BorderSizePixel = 0
         knob.Parent = sw
@@ -747,10 +832,9 @@ if pageCombat and _G.SG_ctxCombat then
             end
         end
         sw.MouseButton1Click:Connect(function() set(not get()); refresh() end)
-        refresh()
         ctx.y = ctx.y + 38
     end
-    
+
     local function slider(label, minV, maxV, get, set)
         local holder = Instance.new("Frame")
         holder.Size = UDim2.new(1, -20, 0, 46)
@@ -764,8 +848,7 @@ if pageCombat and _G.SG_ctxCombat then
         lbl.Size = UDim2.new(1, -20, 0, 16)
         lbl.Position = UDim2.new(0, 10, 0, 4)
         lbl.BackgroundTransparency = 1
-        lbl.TextColor3 = COL.text
-        lbl.TextSize = 11
+        lbl.TextColor3 = COL.text        lbl.TextSize = 11
         lbl.Font = Enum.Font.Gotham
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         lbl.Parent = holder
@@ -819,7 +902,7 @@ if pageCombat and _G.SG_ctxCombat then
         refresh()
         ctx.y = ctx.y + 52
     end
-    
+
     local function button(text, color, callback)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, -20, 0, 30)
@@ -835,7 +918,7 @@ if pageCombat and _G.SG_ctxCombat then
         if callback then b.MouseButton1Click:Connect(callback) end
         ctx.y = ctx.y + 36
     end
-    
+
     section("⚡ TRIGGER BOT")
     toggle("เปิด Trigger Bot", function() return CONFIG.TriggerBotEnabled end,
         function(v) CONFIG.TriggerBotEnabled = v end)
@@ -843,7 +926,7 @@ if pageCombat and _G.SG_ctxCombat then
         function(v) CONFIG.TriggerBotDelay = v / 1000 end)
     slider("ความแม่น %", 10, 100, function() return CONFIG.TriggerBotHitChance end,
         function(v) CONFIG.TriggerBotHitChance = v end)
-    
+
     section("🎯 SILENT AIM")
     toggle("เปิด Silent Aim", function() return CONFIG.SilentAimEnabled end,
         function(v) CONFIG.SilentAimEnabled = v end)
@@ -851,46 +934,51 @@ if pageCombat and _G.SG_ctxCombat then
         function(v) CONFIG.SilentAimFOV = v end)
     toggle("ไม่ยิงทีมเดียวกัน", function() return CONFIG.SilentAimTeamCheck end,
         function(v) CONFIG.SilentAimTeamCheck = v end)
-    
+
     section("📊 AIM PREDICTION")
     toggle("ทำนายตำแหน่ง", function() return CONFIG.AimPredictionEnabled end,
         function(v) CONFIG.AimPredictionEnabled = v end)
     slider("ทำนายล่วงหน้า (ms)", 0, 500, function() return CONFIG.AimPredictionAmount * 1000 end,
         function(v) CONFIG.AimPredictionAmount = v / 1000 end)
-    
+
     section("🎯 TARGET PRIORITY")
-    local prioModes = { "closest", "lowest_hp", "center" }
-    local prioLabels = { closest = "ใกล้สุด", lowest_hp = "HP น้อยสุด", center = "กลางจอ" }
-    for _, mode in ipairs(prioModes) do
-        button(prioLabels[mode], CONFIG.TargetPriority == mode and COL.on or COL.bg3,
-            function()
-                CONFIG.TargetPriority = mode
-                _G.SG_notify("เปลี่ยนเป้า: " .. prioLabels[mode], COL.accent)
-            end)
-    end
-    
+    button("ใกล้สุด", CONFIG.TargetPriority == "closest" and COL.on or COL.bg3,
+        function()
+            CONFIG.TargetPriority = "closest"
+            if notify then notify("เป้า: ใกล้สุด", COL.accent) end
+        end)
+    button("HP น้อยสุด", CONFIG.TargetPriority == "lowest_hp" and COL.on or COL.bg3,
+        function()
+            CONFIG.TargetPriority = "lowest_hp"
+            if notify then notify("เป้า: HP น้อยสุด", COL.accent) end
+        end)
+    button("กลางจอ", CONFIG.TargetPriority == "center" and COL.on or COL.bg3,
+        function()
+            CONFIG.TargetPriority = "center"
+            if notify then notify("เป้า: กลางจอ", COL.accent) end
+        end)
+
     section("🔔 HIT MARKER")
     toggle("แสดง Hit Marker", function() return CONFIG.HitMarkerEnabled end,
         function(v) CONFIG.HitMarkerEnabled = v end)
-    
+
     section("👣 FOOTSTEP ESP")
     toggle("แสดงรอยเท้า", function() return CONFIG.FootstepESPEnabled end,
         function(v) _G.SG_setFootstepESP(v) end)
-    
-    -- Canvas size
+
     pageCombat.CanvasSize = UDim2.new(0, 0, 0, ctx.y + 20)
-    
-    print("[SG] Combat Extras UI เสร็จแล้ว")
 end
 
 --============================================================
--- UI — เพิ่มเข้า pageUtility
+-- UI — เพิ่มในหน้า Utility
 --============================================================
 if pageUtility then
     for _, c in ipairs(pageUtility:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then
+            c:Destroy()
+        end
     end
-    
+
     local ctx = { y = 10 }
     local function section(text)
         local h = Instance.new("Frame")
@@ -935,7 +1023,7 @@ if pageUtility then
         local sw = Instance.new("TextButton")
         sw.Size = UDim2.new(0, 40, 0, 20)
         sw.Position = UDim2.new(1, -48, 0.5, -10)
-        sw.BackgroundColor3 = COL.off
+        sw.BackgroundColor3 = get() and COL.on or COL.off
         sw.BorderSizePixel = 0
         sw.Text = ""
         sw.AutoButtonColor = false
@@ -943,7 +1031,7 @@ if pageUtility then
         Instance.new("UICorner", sw).CornerRadius = UDim.new(1, 0)
         local knob = Instance.new("Frame")
         knob.Size = UDim2.new(0, 16, 0, 16)
-        knob.Position = UDim2.new(0, 2, 0.5, -8)
+        knob.Position = get() and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
         knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         knob.BorderSizePixel = 0
         knob.Parent = sw
@@ -958,7 +1046,6 @@ if pageUtility then
             end
         end
         sw.MouseButton1Click:Connect(function() set(not get()); refresh() end)
-        refresh()
         ctx.y = ctx.y + 38
     end
     local function button(text, color, callback)
@@ -976,7 +1063,7 @@ if pageUtility then
         if callback then b.MouseButton1Click:Connect(callback) end
         ctx.y = ctx.y + 36
     end
-    
+
     section("🛡 DEFENSE")
     toggle("Anti-AFK", function() return CONFIG.AntiAFKEnabled end,
         function(v) _G.SG_setAntiAFK(v) end)
@@ -986,7 +1073,13 @@ if pageUtility then
         function(v) CONFIG.AntiFlingEnabled = v end)
     toggle("Anti-Ragdoll", function() return CONFIG.AntiRagdollEnabled end,
         function(v) CONFIG.AntiRagdollEnabled = v end)
-    
+    toggle("Anti-Void (กันตก)", function() return CONFIG.AntiVoidEnabled end,
+        function(v) CONFIG.AntiVoidEnabled = v end)
+    toggle("Auto-Respawn", function() return CONFIG.AutoRespawnEnabled end,
+        function(v) CONFIG.AutoRespawnEnabled = v end)
+    toggle("Safe Mode", function() return CONFIG.SafeModeEnabled end,
+        function(v) CONFIG.SafeModeEnabled = v end)
+
     section("🎬 VISUAL")
     toggle("RGB UI", function() return CONFIG.RGBUIEnabled end,
         function(v) CONFIG.RGBUIEnabled = v end)
@@ -994,34 +1087,28 @@ if pageUtility then
         function(v) _G.SG_setFreeCam(v) end)
     toggle("Custom Crosshair", function() return CONFIG.CrosshairEnabled end,
         function(v) _G.SG_setCrosshair(v) end)
-    
-    section("🎮 AUTO")
-    toggle("Auto Play (เดินสุ่ม)", function() return CONFIG.AutoPlayEnabled end,
-        function(v) CONFIG.AutoPlayEnabled = v end)
-    
-    section("📸 TOOLS")
-    button("📸 ถ่ายภาพหน้าจอ", COL.accent, function()
-        pcall(function()
-            if captureScreenshot then captureScreenshot("sigmagoon_" .. os.time() .. ".png")
-            else _G.SG_notify("ไม่รองรับ", COL.red) end
+    toggle("Hitbox Expander", function() return CONFIG.HitboxEnabled end,
+        function(v)
+            CONFIG.HitboxEnabled = v
+            if not v then _G.SG_restoreHitbox() end
         end)
-    end)
-    button("💾 บันทึก Config", COL.on, _G.SG_saveConfig)
-    button("📂 โหลด Config", COL.accent, _G.SG_loadConfig)
-    
-    section("💬 CHAT / EMOTE")
+    toggle("Wall Walk", function() return CONFIG.WallWalkEnabled end,
+        function(v) CONFIG.WallWalkEnabled = v end)
+
+    section("🎮 AUTO")
+    toggle("Auto Play", function() return CONFIG.AutoPlayEnabled end,
+        function(v) CONFIG.AutoPlayEnabled = v end)
     toggle("Chat Spam", function() return CONFIG.ChatSpamEnabled end,
         function(v) CONFIG.ChatSpamEnabled = v end)
+
+    section("📸 TOOLS")
+    button("💾 บันทึก Config", COL.on, _G.SG_saveConfig)
+    button("📂 โหลด Config", COL.accent, _G.SG_loadConfig)
     button("👋 Emote ทักทาย", COL.accent, function()
         _G.SG_Emote("👋 Hello!")
     end)
-    button("🎉 Emote ฉลอง", Color3.fromRGB(255, 180, 60), function()
-        _G.SG_Emote("🎉 GG!")
-    end)
-    
+
     pageUtility.CanvasSize = UDim2.new(0, 0, 0, ctx.y + 20)
-    
-    print("[SG] Utility UI เสร็จแล้ว")
 end
 
-print("[SG v7.0] P3 โหลดเสร็จ — 15 ฟีเจอร์ใหม่พร้อมใช้")
+print("[SG v8.0] P3 โหลดเสร็จ — Combat Extras + Utility ครบ")
